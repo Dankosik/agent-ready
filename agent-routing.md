@@ -6,5 +6,6 @@ Tool routing. These are installed and measurably better than the default choice:
 - Python with third-party packages: `uv run --with <pkg> script.py`. `pip install` fails on macOS system Python, and every workaround leaves state behind.
 - Reading diffs: `git -c diff.external='difft --display inline' diff`. Smaller output than plain `git diff` whatever the diff looks like; the bare `difft` default is the opposite.
 - Structured data: `jq` for JSON, `yq` for YAML and TOML. Never a regex — both break on nesting, escaping and key order.
+- Markdown section by heading: `mdq --link-format keep '# ^"Exact heading"$' <file>`. For duplicates, scope it as `# ^"Parent"$ | # ^"Exact heading"$`. Use `rg`/`sed` instead when line numbers or byte-exact source matter.
 - GitHub state: `gh api <path> --jq <filter>`. Do not fetch and scrape HTML.
 - Before calling a shell script done: `shellcheck <file>`. Before calling a workflow done: `actionlint <file>`.

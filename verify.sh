@@ -249,6 +249,38 @@ check_yq() {
 	pass=$((pass + 1))
 }
 
+# ---------------------------------------------------------------- mdq
+check_mdq() {
+	have mdq || return 0
+	rule mdq
+	cat >"${work}/spec.md" <<'EOF'
+# Spec
+
+## Setup
+setup text
+
+## Target
+keep one
+
+### Nested
+keep two
+
+## Next
+drop this
+EOF
+	local stale selected
+	stale=$(sed -n '4,9p' "${work}/spec.md" | tr '\n' ' ')
+	selected=$(mdq --link-format keep '# ^"Target"$' "${work}/spec.md")
+	row "without" "stale sed line range → ${stale}"
+	row "with" "mdq by heading → $(printf '%s' "${selected}" | tr '\n' ' ')"
+	row "verdict" "the heading query kept the complete section and excluded its neighbors"
+	printf '%s' "${selected}" | grep -q 'keep two'
+	if printf '%s' "${selected}" | grep -q 'setup text\|drop this'; then
+		return 1
+	fi
+	pass=$((pass + 1))
+}
+
 # ----------------------------------------------------------------- jq
 check_jq() {
 	have jq || return 0
@@ -314,6 +346,7 @@ check_actionlint
 check_shellcheck
 check_difftastic
 check_yq
+check_mdq
 check_hyperfine
 
 printf '\n%s\n' "$(printf '%.0s─' $(seq 1 64))"

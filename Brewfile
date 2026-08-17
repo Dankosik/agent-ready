@@ -67,6 +67,10 @@ brew "difftastic"
 # Line-based edits to config files drop comments or produce valid-but-different files.
 brew "yq"
 
+# Markdown query tool.
+# Heading-based reads survive line shifts and return one semantic section.
+brew "mdq"
+
 # Statistical command-line benchmarking.
 # "It got faster" without a measurement is a claim, not a result.
 brew "hyperfine"

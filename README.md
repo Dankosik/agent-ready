@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="platform macOS" src="https://img.shields.io/badge/platform-macOS-lightgrey">
-  <img alt="13 generic tools" src="https://img.shields.io/badge/generic_tools-13-brightgreen">
+  <img alt="14 generic tools" src="https://img.shields.io/badge/generic_tools-14-brightgreen">
 </p>
 
 <p align="center">
@@ -72,7 +72,7 @@ Coding agents usually choose the command they already know. In the transcript sa
 ```text
 ./install.sh
 ├── Brewfile
-│   └── installs 13 generic tools
+│   └── installs 14 generic tools
 └── agent-routing.md
     ├── ~/.claude/CLAUDE.md
     ├── ~/.codex/AGENTS.md
@@ -115,6 +115,7 @@ These five cover the broadest failure modes.
 | [`gh`](https://cli.github.com/) | Reads typed GitHub data instead of scraping HTML |
 | [`jq`](https://jqlang.org/) | Reads and transforms JSON safely |
 | [`yq`](https://mikefarah.gitbook.io/yq/) | Reads and edits YAML, TOML, and XML without line-based parsing |
+| [`mdq`](https://github.com/yshavit/mdq) | Reads Markdown sections by heading instead of stale line ranges |
 | [`difftastic`](https://difftastic.wilfred.me.uk/) | Produces syntax-aware diffs with less irrelevant output |
 | [`hyperfine`](https://github.com/sharkdp/hyperfine) | Benchmarks commands with warmups and repeated runs |
 
@@ -135,6 +136,7 @@ The script creates temporary fixtures, prints both results, and removes the fixt
 | `sed -i` leaves a macOS file unchanged | `sd` performs the replacement |
 | a secret enters Git history | `gitleaks` identifies the rule, file, and commit |
 | a workflow typo requires a push and CI run | `actionlint` reports it locally |
+| a shifted Markdown file makes a cached line range read the wrong text | `mdq` selects the complete section by heading |
 
 <details>
 <summary><strong>Verification notes for gh, difftastic, and rtk</strong></summary>
@@ -191,7 +193,7 @@ Pull requests that add a tool should include a runnable proof of the failure it 
 <details>
 <summary><strong>Verified versions, 2026-08-17</strong></summary>
 
-Generic tools: rtk 0.45.0, uv 0.11.1, sd 1.1.0, ripgrep 15.2.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, and hyperfine 1.20.0.
+Generic tools: rtk 0.45.0, uv 0.11.1, sd 1.1.0, ripgrep 15.2.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, mdq 0.10.0, and hyperfine 1.20.0.
 
 Go adapter: gopls 0.23.0.
 
