@@ -1,12 +1,28 @@
-# agent-ready
+<h1 align="center">agent-ready</h1>
 
-![license MIT](https://img.shields.io/badge/license-MIT-blue)
-![platform macOS](https://img.shields.io/badge/platform-macOS-lightgrey)
-![13 generic tools](https://img.shields.io/badge/generic_tools-13-brightgreen)
+<p align="center"><strong>Reliable command-line tooling for Claude Code, Codex, and Cursor on macOS.</strong></p>
 
-Reliable command-line tooling for Claude Code, Codex, and Cursor on macOS.
+<p align="center">
+  <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="platform macOS" src="https://img.shields.io/badge/platform-macOS-lightgrey">
+  <img alt="13 generic tools" src="https://img.shields.io/badge/generic_tools-13-brightgreen">
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#why-it-exists">Why it exists</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#tools">Tools</a> ·
+  <a href="#verification">Verification</a> ·
+  <a href="#go-adapter">Go adapter</a>
+</p>
 
 `agent-ready` installs a small, language-independent CLI toolkit and adds the routing instructions that make coding agents use it. Each generic tool must prevent a real failure or produce a measurable improvement, with a local comparison you can run.
+
+## Quick start
+
+> [!NOTE]
+> Requires macOS and [Homebrew](https://brew.sh/).
 
 ```bash
 git clone https://github.com/Dankosik/agent-ready.git
@@ -14,11 +30,17 @@ cd agent-ready
 ./install.sh
 ```
 
-Requirements: macOS and [Homebrew](https://brew.sh/).
+Run the included comparisons after installation:
 
-## The problem
+```bash
+./verify.sh
+```
 
-Coding agents usually choose familiar commands, not the best command available on the machine. On macOS, a familiar Linux command can fail even when it looks correct:
+## Why it exists
+
+### Familiar commands can fail on macOS
+
+An agent writes the GNU-style command it has seen most often:
 
 ```console
 $ echo hello > /tmp/demo
@@ -28,42 +50,49 @@ $ cat /tmp/demo
 hello
 ```
 
-The GNU-style `sed -i` form that agents commonly write exits with an error and leaves the file unchanged with BSD `sed`. Other failures are less visible: recursive `grep` searches Git metadata and ignored files, regex misses code split across lines, and large command output consumes context without helping the task.
+BSD `sed` exits with an error and leaves the file unchanged. Other failures are less obvious:
 
-Installing better tools solves only half of the problem. In the transcript sample used for this repository, across 277,325 shell commands from 1,125 agent sessions, agents used `grep` 21,878 times and `rg` 8,117 times even when ripgrep was available.
+- recursive `grep` searches Git metadata and ignored files;
+- regex misses code split across lines;
+- verbose command output consumes context without helping the task.
 
-The agent needs both the tool and an instruction that routes the right task to it.
+### Installed tools can sit unused
+
+Coding agents usually choose the command they already know. In the transcript sample used for this repository, 1,125 agent sessions produced 277,325 shell commands:
+
+| Tool available | Agent used it | Familiar fallback | Agent used it |
+|---|---:|---|---:|
+| `ripgrep` | 8,117 times | `grep` | 21,878 times |
+
+> [!IMPORTANT]
+> A useful setup needs both the tools and instructions that route tasks to them. `agent-ready` installs both.
 
 ## How it works
 
-`./install.sh` performs two jobs:
-
-1. Homebrew installs 13 generic tools from the root [`Brewfile`](Brewfile).
-2. The installer adds the routing rules from [`agent-routing.md`](agent-routing.md) to every supported agent it finds.
-
-The managed rules are written to:
-
 ```text
-~/.claude/CLAUDE.md
-~/.codex/AGENTS.md
-~/.cursor/AGENTS.md
+./install.sh
+├── Brewfile
+│   └── installs 13 generic tools
+└── agent-routing.md
+    ├── ~/.claude/CLAUDE.md
+    ├── ~/.codex/AGENTS.md
+    └── ~/.cursor/AGENTS.md
 ```
 
-They live between `<!-- agent-ready:start -->` and `<!-- agent-ready:end -->`. Existing content outside those markers stays untouched. Run the installer again to update the tools and refresh the managed block without duplicating it.
+The routing rules live between `<!-- agent-ready:start -->` and `<!-- agent-ready:end -->`. Existing content outside those markers stays untouched. Running the installer again refreshes the managed block instead of duplicating it.
 
-To refresh only the instructions:
+> [!TIP]
+> If the tools are already installed, run `./install.sh --configure-only` to refresh only the instructions.
 
-```bash
-./install.sh --configure-only
-```
+`rtk` needs no routing rule because it hooks shell calls directly. Language servers register through their language adapters.
 
-`rtk` needs no routing rule because it hooks shell calls directly. Language servers register through their own adapters.
+## Tools
 
-## What gets installed
+### Core tools
 
-The first five cover the broadest and most common failure modes.
+These five cover the broadest failure modes.
 
-| Tool | Job |
+| Tool | What it changes |
 |---|---|
 | [`rtk`](https://github.com/rtk-ai/rtk) | Filters verbose command output before it reaches the model |
 | [`uv`](https://docs.astral.sh/uv/) | Runs Python scripts with temporary dependencies instead of modifying system Python |
@@ -71,32 +100,33 @@ The first five cover the broadest and most common failure modes.
 | [`ripgrep`](https://github.com/BurntSushi/ripgrep) | Searches repository content while respecting ignore rules |
 | [`ast-grep`](https://ast-grep.github.io/) | Searches and rewrites parsed code instead of matching source text with regex |
 
-The remaining tools cover narrower safety, feedback, and measurement cases.
+### Safety and local feedback
 
-| Tool | Job |
+| Tool | What it catches |
+|---|---|
+| [`gitleaks`](https://github.com/gitleaks/gitleaks) | Secrets in the working tree and Git history before they are pushed |
+| [`actionlint`](https://github.com/rhysd/actionlint) | GitHub Actions errors before a CI run |
+| [`shellcheck`](https://www.shellcheck.net/) | Shell errors before runtime or CI |
+
+### Data, GitHub, and measurement
+
+| Tool | What it changes |
 |---|---|
 | [`gh`](https://cli.github.com/) | Reads typed GitHub data instead of scraping HTML |
 | [`jq`](https://jqlang.org/) | Reads and transforms JSON safely |
-| [`gitleaks`](https://github.com/gitleaks/gitleaks) | Detects secrets in the working tree and Git history before they are pushed |
-| [`actionlint`](https://github.com/rhysd/actionlint) | Checks GitHub Actions workflows locally |
-| [`shellcheck`](https://www.shellcheck.net/) | Finds shell errors before runtime or CI |
-| [`difftastic`](https://difftastic.wilfred.me.uk/) | Produces syntax-aware diffs with less irrelevant output |
 | [`yq`](https://mikefarah.gitbook.io/yq/) | Reads and edits YAML, TOML, and XML without line-based parsing |
+| [`difftastic`](https://difftastic.wilfred.me.uk/) | Produces syntax-aware diffs with less irrelevant output |
 | [`hyperfine`](https://github.com/sharkdp/hyperfine) | Benchmarks commands with warmups and repeated runs |
 
-This is intentionally a short list. Convenience alone is not enough for a tool to enter the generic `Brewfile`.
+Convenience alone is not enough for a tool to enter the generic [`Brewfile`](Brewfile).
 
-## Verify the claims
-
-Run the tools against the alternatives an agent would normally choose:
+## Verification
 
 ```bash
 ./verify.sh
 ```
 
 The script creates temporary fixtures, prints both results, and removes the fixtures when it exits. It does not install, remove, or configure anything.
-
-Examples covered by the verification script include:
 
 | Without the tool | With the tool |
 |---|---|
@@ -106,11 +136,16 @@ Examples covered by the verification script include:
 | a secret enters Git history | `gitleaks` identifies the rule, file, and commit |
 | a workflow typo requires a push and CI run | `actionlint` reports it locally |
 
-The `gh` check is included even though HTML scraping returns the correct value in its fixture. It demonstrates the difference between a typed API field and a large response tied to current page markup.
+<details>
+<summary><strong>Verification notes for gh, difftastic, and rtk</strong></summary>
 
-### Difftastic needs one explicit option
+### GitHub CLI
 
-Use its inline display for agent output:
+The `gh` check is included even though HTML scraping returns the correct value in its fixture. It compares a typed API field with a large response tied to current page markup.
+
+### Difftastic
+
+Use the inline display for agent output:
 
 ```bash
 git -c diff.external='difft --display inline' diff
@@ -118,24 +153,22 @@ git -c diff.external='difft --display inline' diff
 
 The default side-by-side view is designed for a human terminal and can be larger than `git diff`. `./verify.sh` reports the raw, default, and inline sizes for its current fixture.
 
-### rtk reports an estimate
+### rtk
 
 `rtk gain` measures commands it proxied, but it cannot see later shell filters such as `| head -20`. Treat the aggregate as indicative. `./verify.sh` compares raw and filtered output for one controlled command instead.
 
-## Language adapters
+</details>
 
-Language-specific tools stay outside the generic `Brewfile`. Each adapter has its own installer and verification command.
+## Go adapter
 
-### Go
+Language-specific tools stay outside the generic `Brewfile`. The Go adapter has its own installation and verification path:
 
 ```bash
 ./languages/go/install.sh
 ./languages/go/verify.sh
 ```
 
-The Go adapter installs the official [`gopls`](https://go.dev/gopls/features/mcp) language server and registers `gopls mcp` with each supported agent it finds. It gives the agent compiler-backed workspace discovery, diagnostics, references, rename, code search, and vulnerability checks.
-
-The MCP surface is experimental and may change. It can run Go commands, download modules into the Go cache, and query the vulnerability database when requested, so give it the same access you would give local project tooling.
+It installs the official [`gopls`](https://go.dev/gopls/features/mcp) language server and registers `gopls mcp` with each supported agent it finds. This gives the agent compiler-backed workspace discovery, diagnostics, references, rename, code search, and vulnerability checks.
 
 To register an existing `gopls` installation without running Homebrew:
 
@@ -143,19 +176,29 @@ To register an existing `gopls` installation without running Homebrew:
 ./languages/go/install.sh --configure-only
 ```
 
-## Scope
+> [!NOTE]
+> The MCP surface is experimental and may change. It can run Go commands, download modules into the Go cache, and query the vulnerability database when requested. Give it the same access you would give local project tooling.
+
+## Project boundaries
 
 - macOS with Homebrew is the only supported platform today.
 - The root installer contains only language-independent tools. Language integrations live under `languages/<name>/`.
 - The project owns no tools in the list. A tool can be replaced or removed when a better option has evidence behind it.
 - A Brewfile is not a lockfile. Homebrew installs current formula versions.
 
-Generic snapshot checked on 2026-08-17: rtk 0.45.0, uv 0.11.1, sd 1.1.0, ripgrep 15.2.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, and hyperfine 1.20.0. The Go adapter was checked with gopls 0.23.0.
-
 Pull requests that add a tool should include a runnable proof of the failure it prevents or the improvement it makes.
 
 <details>
-<summary>Considered and rejected</summary>
+<summary><strong>Verified versions, 2026-08-17</strong></summary>
+
+Generic tools: rtk 0.45.0, uv 0.11.1, sd 1.1.0, ripgrep 15.2.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, and hyperfine 1.20.0.
+
+Go adapter: gopls 0.23.0.
+
+</details>
+
+<details>
+<summary><strong>Considered and rejected</strong></summary>
 
 | Tool | Why it is not included |
 |---|---|
