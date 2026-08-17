@@ -105,8 +105,9 @@ for target in \
 	"${fake_home}/.copilot/copilot-instructions.md" \
 	"${fake_home}/.codeium/windsurf/memories/global_rules.md"; do
 	[ "$(rg -c '^- Go:' "${target}")" -eq 1 ]
+	rg -qF 'use gopls where compiler semantics matter' "${target}"
 done
-jq -e '.additional_context | contains("- Go:")' \
+jq -e '.additional_context | contains("use gopls where compiler semantics matter")' \
 	"${fake_home}/.cursor/hooks/agent-ready-session-start.json" >/dev/null
 
 for expected in \
