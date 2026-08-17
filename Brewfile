@@ -9,7 +9,7 @@
 # Run ./verify.sh to watch each one beat the alternative on your own machine.
 
 # ---------------------------------------------------------------- start here
-# These four carry most of the value. None depends on the agent remembering to
+# These five carry most of the value. None depends on the agent remembering to
 # reach for it at the right moment.
 
 # Proxy that filters verbose command output before it reaches the model.
@@ -25,6 +25,10 @@ brew "uv"
 # Find-and-replace with literal and PCRE modes.
 # BSD sed on macOS rejects the GNU `sed -i 's/…/…/' file` form every agent writes.
 brew "sd"
+
+# Repository-aware recursive text search.
+# BSD grep walks into .git and ignored files, and rejects common PCRE forms.
+brew "ripgrep"
 
 # Structural search and rewrite over a parsed syntax tree.
 # Regex silently misses code split across lines and silently matches comments.

@@ -1,0 +1,9 @@
+# Screen-capture tooling writes timestamped images into the working directory.
+# One was swept into a commit by `git add -A`; never again.
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.mov
+*.mp4

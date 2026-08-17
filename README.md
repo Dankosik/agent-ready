@@ -1,14 +1,33 @@
 # agent-ready
 
-![license MIT](https://img.shields.io/badge/license-MIT-blue) ![platform macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![12 generic tools](https://img.shields.io/badge/generic_tools-12-brightgreen)
+![license MIT](https://img.shields.io/badge/license-MIT-blue) ![platform macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![13 generic tools](https://img.shields.io/badge/generic_tools-13-brightgreen)
 
-**Set up macOS for coding with AI agents — Claude Code, Codex, Cursor — in one command.** Twelve language-independent CLI tools installed with Homebrew, each chosen for one reason, each with a proof you can run in under a minute.
+**Set up macOS for coding with AI agents — Claude Code, Codex, Cursor — in one command.** Thirteen language-independent CLI tools installed with Homebrew, each chosen for one reason, each with a proof you can run in under a minute.
 
 ```bash
 git clone https://github.com/Dankosik/agent-ready && cd agent-ready && ./install.sh
 ```
 
+That installs the tools **and tells your agent they exist** — see below for why the second half is not optional. Re-run with `--configure-only` to refresh just the instructions.
+
 Language-specific tools have separate installers. For Go, run `./languages/go/install.sh` after the generic setup, or run it alone if only the Go adapter is needed.
+
+## Installing a tool does not mean the agent will use it
+
+This is the part most setup guides skip, and it is measurable.
+
+On real session transcripts — 277,325 shell commands from 1,125 agent sessions — the agent reaches for the command it already knows, not the better one sitting on `PATH`:
+
+| Available on the machine | Agent used | Agent used instead |
+|---|---|---|
+| `worktrunk`, a git-worktree CLI built for agents | **1** | `git worktree` — **115** |
+| `ripgrep` | 8,117 | `grep` — **21,878** |
+
+Nothing was wrong with those tools. Nothing had told the agent about them. `grep` and `git worktree` are in every model's training data; `wt` and `rg` compete against that from a standing start.
+
+So `install.sh` does two things: `brew bundle`, then it writes [`agent-routing.md`](agent-routing.md) into `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` and `~/.cursor/AGENTS.md`, between `<!-- agent-ready:start -->` markers. Everything outside the markers is left alone, and re-running refreshes the block rather than duplicating it. Roughly ten lines, and it is the difference between owning these tools and using them.
+
+The exceptions are the entries that need no announcement: `rtk` hooks the shell call and a language server registers as MCP. Those substitute themselves — which is why they are the most reliable things on this page.
 
 ## Why this exists
 
@@ -23,19 +42,20 @@ hello
 
 The file is unchanged. On macOS, BSD `sed` reads the argument after `-i` as a backup-file suffix, so the substitution became the suffix and your filename became the script. It errors — with a message that depends on your path — and the edit never happens.
 
-That is one entry out of twelve. Every generic tool here removes a way for an agent to be **confidently wrong**, or measurably changes how well it works. Convenience tools were cut, and [what was rejected](#considered-and-rejected) is listed with reasons.
+That is one entry out of thirteen. Every generic tool here removes a way for an agent to be **confidently wrong**, or measurably changes how well it works. Convenience tools were cut, and [what was rejected](#considered-and-rejected) is listed with reasons.
 
 ## What gets installed
 
-The twelve are not equally load-bearing, and a flat list would imply they are.
+The thirteen are not equally load-bearing, and a flat list would imply they are.
 
-**Start here.** These four carry most of the value, and none of them depends on you remembering to reach for it at the right moment:
+**Start here.** These five carry most of the value, and none of them depends on you remembering to reach for it at the right moment:
 
 | Tool | Why it is here |
 |---|---|
 | **rtk** | Filters verbose command output before it reaches the model — automatically, on every command |
 | **uv** | `pip install` fails outright on macOS system Python; every fallback the agent picks is worse |
 | **sd** | `sed -i` does not edit files on macOS; the alternative is not worse, it is broken |
+| **ripgrep** | Recursive `grep` searches Git metadata and ignored files; common PCRE forms fail on macOS |
 | **ast-grep** | Structural search; a regex that misses code split across lines reports "no matches" and raises nothing |
 
 **The rest.** Each closes a real case, but a narrower or more situational one:
@@ -47,7 +67,7 @@ The twelve are not equally load-bearing, and a flat list would imply they are.
 | **gitleaks** | Agents copy live keys into fixtures and commit them; pushing is irreversible |
 | **actionlint** | Workflow edits otherwise cost a push-and-wait round trip per typo |
 | **shellcheck** | Shell has no compiler; mistakes surface in CI |
-| **difftastic** | Separates reformatting from a real edit |
+| **difftastic** | Smaller diffs than `git diff` — with `--display inline`, which is not the default |
 | **yq** | Line edits drop YAML comments and anchors |
 | **hyperfine** | Turns "it got faster" into a measurement |
 
@@ -105,6 +125,22 @@ uv run --with humanize report.py
 Ephemeral environment, nothing installed globally, nothing left behind. `uvx <tool>` does the same for any Python CLI without installing it.
 
 The adoption signal here is unusually strong: independent projects — Armin Ronacher's agent scripts and Trail of Bits' Python skill among them — ship PATH shims that intercept `pip`, `poetry` and `python` and redirect them to `uv`. People are not merely installing it, they are forcing their agents onto it.
+
+</details>
+
+<details>
+<summary><b>ripgrep</b> — repository search should search the repository</summary>
+
+BSD `grep -R` descends into `.git` and ignored files. Those are real text matches, so the command succeeds and the agent cannot tell that none of them came from source. On this repository, searching a commit-message prefix returned three files — all Git metadata — while `rg` correctly returned none.
+
+```bash
+grep -R -l 'feat:' .   # .git/logs/HEAD, refs, COMMIT_EDITMSG
+rg -l 'feat:' .        # no source matches
+```
+
+[`ripgrep`](https://github.com/BurntSushi/ripgrep) respects Git ignore rules and skips hidden and binary files by default. It also gives the agent the same PCRE2 (`-P`), multiline (`-U`) and structured JSON (`--json`) surface on macOS, Linux and Windows.
+
+Use `rg` for text, config and exact literals. Use `ast-grep` below when syntax matters.
 
 </details>
 
@@ -213,15 +249,26 @@ This is the same tool the pinned `koalaman/shellcheck` CI images run. Having it 
 </details>
 
 <details>
-<summary><b>difftastic</b> — tells reformatting apart from a real edit</summary>
+<summary><b>difftastic</b> — fewer tokens than <code>git diff</code>, in both directions</summary>
 
-Review of agent output is where you catch what tests do not. Line diffs make that harder: reordered imports, a reflowed argument list, a moved brace all render as changes.
+Line diffs cannot tell a reformat from an edit: reordered imports, a reflowed argument list, a moved brace all render as changes. difftastic compares syntax trees, so unchanged structure disappears.
+
+**Use the inline display. The default is the wrong one here:**
 
 ```bash
-git -c diff.external=difft diff
+git -c diff.external='difft --display inline' diff
 ```
 
-Compares syntax trees, so formatting churn collapses and the actual edit stands out. No global config needed — the `-c` form is per-invocation.
+Measured on a 40-function file, output size into the model:
+
+| | `git diff` | `difft` default (side-by-side) | `difft --display inline` |
+|---|---|---|---|
+| All 40 reformatted, one value changed | 3,943 B | 317 B | **214 B** |
+| All 40 genuinely changed, no reformat | 3,228 B | 10,388 B | **2,340 B** |
+
+The default is two aligned columns — tuned for a human reading a terminal, and it is what makes difftastic *worse* than plain `git diff` when the changes are real. Inline is a single column, and it wins in both directions: 18x smaller on a reformat-heavy diff, and still 28% smaller when every line genuinely changed.
+
+Neither mode emits ANSI escapes when piped, so nothing is spent on colour codes the model cannot use.
 
 </details>
 
@@ -387,7 +434,7 @@ A related habit worth borrowing: **GitHub stars are a poor proxy for whether a t
 
 A Brewfile is not a lockfile — Homebrew formulae roll forward, so this installs current versions rather than the ones recorded here.
 
-**Generic snapshot: 2026-08-17.** Verified against rtk 0.45.0, uv 0.11.1, sd 1.1.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, hyperfine 1.20.0. The Go adapter was verified against gopls 0.23.0.
+**Generic snapshot: 2026-08-17.** Verified against rtk 0.45.0, uv 0.11.1, sd 1.1.0, ripgrep 15.2.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, hyperfine 1.20.0. The Go adapter was verified against gopls 0.23.0.
 
 Treat this as a dated snapshot with its reasoning attached, not a maintained index. PRs adding a tool are welcome when they carry a runnable proof of what it prevents or measurably improves. PRs that only assert a tool is good will be closed with a link to this line — that rule is what keeps the list short enough to be worth reading.
 

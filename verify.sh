@@ -54,6 +54,26 @@ check_rtk() {
 	pass=$((pass + 1))
 }
 
+# ------------------------------------------------------------- ripgrep
+check_ripgrep() {
+	have rg || return 0
+	rule ripgrep
+	local repo="${work}/search" raw filtered
+	mkdir -p "${repo}/src"
+	git -C "${repo}" init -q
+	printf 'ignored.log\n' >"${repo}/.gitignore"
+	printf 'needle\n' >"${repo}/src/real.txt"
+	printf 'needle\n' >"${repo}/ignored.log"
+	git -C "${repo}" add .gitignore src/real.txt
+	git -C "${repo}" -c user.email=v@v -c user.name=v commit -qm "needle in metadata"
+	raw=$(cd "${repo}" && grep -R -l needle . 2>/dev/null | wc -l | tr -d ' ')
+	filtered=$(cd "${repo}" && rg -l needle . | wc -l | tr -d ' ')
+	row "without" "grep -R → ${raw} files, including .git and ignored.log"
+	row "with" "rg → ${filtered} source file"
+	row "verdict" "grep quietly mixed repository content with ignored state and Git metadata"
+	pass=$((pass + 1))
+}
+
 # ------------------------------------------------------------ ast-grep
 check_ast_grep() {
 	have ast-grep || return 0
@@ -188,16 +208,30 @@ EOF
 check_difftastic() {
 	have difft || return 0
 	rule difftastic
-	local repo="${work}/gitdemo"
+	local repo="${work}/gitdemo" i
 	mkdir -p "${repo}"
 	git -C "${repo}" init -q
-	printf 'function calc(a,b){\n  return a+b;\n}\n' >"${repo}/calc.js"
+	: >"${repo}/big.js"
+	for i in $(seq 0 39); do
+		printf 'function f%d(a,b){\n  return a+b+%d;\n}\n' "${i}" "${i}" >>"${repo}/big.js"
+	done
 	git -C "${repo}" add -A
 	git -C "${repo}" -c user.email=v@v -c user.name=v commit -qm init
-	printf 'function calc(\n  a,\n  b\n) {\n  return a + b;\n}\n' >"${repo}/calc.js"
-	row "without" "git diff → $(git -C "${repo}" diff --numstat | awk '{print $1" added, "$2" removed"}')"
-	row "with" "difft → $(git -C "${repo}" -c diff.external=difft diff 2>/dev/null | sed -n '2p' | xargs)"
-	row "verdict" "the reformat changed nothing; only one of these says so"
+	# Reformat every function; change exactly one value (f17: 17 -> 999).
+	: >"${repo}/big.js"
+	for i in $(seq 0 39); do
+		local v="${i}"
+		[ "${i}" -eq 17 ] && v=999
+		printf 'function f%d(\n  a,\n  b\n) {\n  return a * 1 + b + %d;\n}\n' "${i}" "${v}" >>"${repo}/big.js"
+	done
+	local plain sbs inline
+	plain=$(git -C "${repo}" diff | wc -c | tr -d ' ')
+	sbs=$(git -C "${repo}" -c diff.external='difft --display side-by-side --width 100' diff 2>/dev/null | wc -c | tr -d ' ')
+	inline=$(git -C "${repo}" -c diff.external='difft --display inline --width 100' diff 2>/dev/null | wc -c | tr -d ' ')
+	row "without" "git diff → ${plain} bytes into the model"
+	row "with" "difft --display inline → ${inline} bytes"
+	row "note" "difft's own default (side-by-side) → ${sbs} bytes — the human layout, not the cheap one"
+	row "verdict" "same information, one column instead of two; always pass --display inline"
 	pass=$((pass + 1))
 }
 
@@ -271,6 +305,7 @@ printf 'fixtures in %s (deleted on exit)\n' "${work}"
 check_rtk
 check_uv
 check_sd
+check_ripgrep
 check_ast_grep
 check_gh
 check_jq
