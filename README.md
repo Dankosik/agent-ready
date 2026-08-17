@@ -1,19 +1,46 @@
 # agent-ready
 
-You just opened a fresh machine and you want to code with AI agents on it. This is what to install, and why.
+![license MIT](https://img.shields.io/badge/license-MIT-blue) ![platform macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![9 tools](https://img.shields.io/badge/tools-9-brightgreen)
+
+**Set up macOS for coding with AI agents — Claude Code, Codex, Cursor — in one command.** Nine CLI tools installed with Homebrew, each chosen for one reason, each with a proof you can run in under a minute.
 
 ```bash
 git clone https://github.com/Dankosik/agent-ready && cd agent-ready && brew bundle
 ```
 
-Nine tools. Each one either prevents a class of result that is **wrong and quiet**, or measurably changes how well an agent works. Convenience tools were cut, and [what was rejected](#considered-and-rejected) is listed with reasons.
+## Why this exists
 
-Expand any entry below for the reasoning and a command you can run to check it yourself.
+An agent asked to rename something reaches for the form it knows:
+
+```console
+$ echo hello > /tmp/demo
+$ sed -i 's/hello/world/' /tmp/demo    # the GNU form every agent writes
+$ cat /tmp/demo
+hello
+```
+
+The file is unchanged. On macOS, BSD `sed` reads the argument after `-i` as a backup-file suffix, so the substitution became the suffix and your filename became the script. It errors — with a message that depends on your path — and the edit never happens.
+
+That is one entry out of nine. Every tool here removes a way for an agent to be **confidently wrong**, or measurably changes how well it works. Convenience tools were cut, and [what was rejected](#considered-and-rejected) is listed with reasons.
 
 ## What gets installed
 
+| Tool | Why it is here |
+|---|---|
+| **rtk** | Filters verbose command output before it reaches the model |
+| **ast-grep** | Structural search; regex misses code split across lines |
+| **sd** | `sed -i` does not work on macOS |
+| **shellcheck** | Shell has no compiler; mistakes surface in CI |
+| **difftastic** | Separates reformatting from a real edit |
+| **yq** | Line edits drop YAML comments and anchors |
+| **jq** | Regex over JSON breaks on nesting and escaping |
+| **gh** | Structured GitHub data instead of scraped HTML |
+| **hyperfine** | Turns "it got faster" into a measurement |
+
+Expand any entry for the reasoning and a command that checks it.
+
 <details>
-<summary><b>rtk</b> — cuts verbose command output before it reaches the model</summary>
+<summary><b>rtk</b> — token budget is what limits how long an agent stays useful</summary>
 
 An agent's useful lifetime is bounded by how fast it fills its context. A single `git status`, `ls -R` or test run can spend thousands of tokens on output the model does not need in full.
 
@@ -31,7 +58,7 @@ This is the one entry about capacity rather than correctness, and it earns the l
 </details>
 
 <details>
-<summary><b>ast-grep</b> — regex silently misses code split across lines</summary>
+<summary><b>ast-grep</b> — a regex that finds nothing does not look like a bug</summary>
 
 An agent asked to find every `foo(1, 2)` writes a regex. Here is a six-line file:
 
@@ -58,17 +85,9 @@ The failure mode is the dangerous one. A regex that returns nothing does not err
 </details>
 
 <details>
-<summary><b>sd</b> — <code>sed -i</code> silently does nothing on macOS</summary>
+<summary><b>sd</b> — find-and-replace that behaves the same on every machine</summary>
 
-Every agent knows the GNU form. On macOS it does this:
-
-```bash
-echo hello > /tmp/demo && sed -i 's/hello/world/' /tmp/demo && cat /tmp/demo
-```
-
-The file still contains `hello`.
-
-BSD `sed` reads the argument after `-i` as a backup-file suffix, so `s/hello/world/` becomes the suffix and the *filename* becomes the script. What you see next depends on the path: `/tmp/demo` and `/tmp/x` produce two different errors on the same machine, because sed is parsing your path as sed source. Some forms leave a stray `.bak` beside the original instead.
+The failure is shown at the top of this README. The cause: BSD `sed` takes the argument after `-i` as a backup-file suffix. What you see next depends on the path — `/tmp/demo` and `/tmp/x` produce two different errors on the same machine, because sed is parsing your path as sed source. Some forms leave a stray `.bak` beside the original instead.
 
 The message varies; the invariant does not. **The edit does not happen**, and nothing about the command's shape suggests that in advance.
 
@@ -154,7 +173,7 @@ hyperfine --warmup 3 'make check'
 ## Not in the Brewfile, still worth doing
 
 <details>
-<summary><b>A language server for your language, wired as MCP</b> — the highest-leverage item here</summary>
+<summary><b>A language server, wired as MCP</b> — the highest-leverage item here</summary>
 
 For Go that is `gopls`, which since v0.20 speaks MCP directly:
 
