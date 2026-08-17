@@ -72,6 +72,81 @@ EOF
 	pass=$((pass + 1))
 }
 
+# ----------------------------------------------------------------- uv
+check_uv() {
+	have uv || return 0
+	rule uv
+	cat >"${work}/report.py" <<'EOF'
+import humanize, datetime
+print("build took", humanize.naturaldelta(datetime.timedelta(seconds=4271)))
+EOF
+	# --dry-run so this check never installs anything, on any platform.
+	local pipout
+	pipout=$(pip3 install --dry-run humanize 2>&1 | head -1 || true)
+	row "without" "pip3 install humanize → ${pipout}"
+	row "with" "uv run --with humanize → $(uv run --quiet --with humanize "${work}/report.py" 2>&1 | tail -1)"
+	if printf '%s' "${pipout}" | grep -q 'externally-managed'; then
+		row "verdict" "system Python refuses; the agent's fallbacks are venv sprawl or --break-system-packages"
+	else
+		row "verdict" "this interpreter allows it — the failure above is macOS/PEP-668 specific"
+	fi
+	pass=$((pass + 1))
+}
+
+# ----------------------------------------------------------- gitleaks
+check_gitleaks() {
+	have gitleaks || return 0
+	rule gitleaks
+	local repo="${work}/secrets"
+	mkdir -p "${repo}"
+	git -C "${repo}" init -q
+	cat >"${repo}/config_test.go" <<'EOF'
+package config
+
+// fixture: copied real values out of .env so the integration test would pass
+const awsKeyID = "AKIA4X7QZP2NVBWK3TLM"
+const ghToken = "ghp_9fK2mQ7xR4tL8wZ1nB5vC3jH6yD0sA4gT2eU"
+EOF
+	git -C "${repo}" add -A
+	git -C "${repo}" -c user.email=v@v -c user.name=v commit -qm "add test fixture"
+	row "without" "the commit succeeds; the keys are in history and stay there"
+	row "with" "gitleaks detect → $(gitleaks detect --source "${repo}" --no-banner 2>&1 |
+		grep -o 'leaks found: [0-9]*' | tail -1) ($(gitleaks detect --source "${repo}" --no-banner -v 2>&1 |
+		grep -o 'RuleID:.*' | awk '{print $2}' | paste -sd' ' -))"
+	row "verdict" "pushing is irreversible — a leaked key is rotated, not deleted"
+	pass=$((pass + 1))
+}
+
+# ---------------------------------------------------------- actionlint
+check_actionlint() {
+	have actionlint || return 0
+	rule actionlint
+	mkdir -p "${work}/.github/workflows"
+	cat >"${work}/.github/workflows/ci.yml" <<'EOF'
+name: ci
+on: [issues, push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "title is ${{ github.event.issue.title }}"
+      - run: |
+          f="my file.txt"
+          if [ -f $f ]; then echo yes; fi
+EOF
+	row "without" "the only feedback on a workflow edit is push, wait, read CI"
+	# actionlint exits non-zero when it finds anything, which is the normal case here.
+	local out found
+	# Pass the file explicitly: with no argument actionlint resolves workflows
+	# from the git project root, and this fixture directory is not a repository.
+	out=$(actionlint -no-color -oneline "${work}/.github/workflows/ci.yml" 2>/dev/null || true)
+	found=$(printf '%s\n' "${out}" | grep -c . || true)
+	row "with" "actionlint → ${found} findings, locally, in milliseconds"
+	printf '%s\n' "${out}" | sed -E 's|^[^ ]+ ||; s/(.{68}).*/\1…/; s/^/            /'
+	row "verdict" "one is script injection from an issue title; the other came from shellcheck"
+	pass=$((pass + 1))
+}
+
 # ----------------------------------------------------------------- sd
 check_sd() {
 	have sd || return 0
@@ -194,13 +269,16 @@ printf 'agent-ready — verifying every claim in README.md\n'
 printf 'fixtures in %s (deleted on exit)\n' "${work}"
 
 check_rtk
-check_ast_grep
+check_uv
 check_sd
+check_ast_grep
+check_gh
+check_jq
+check_gitleaks
+check_actionlint
 check_shellcheck
 check_difftastic
 check_yq
-check_jq
-check_gh
 check_hyperfine
 
 printf '\n%s\n' "$(printf '%.0s─' $(seq 1 64))"

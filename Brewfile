@@ -5,18 +5,51 @@
 # result, or measurably changes how well an agent works. Tools that only save
 # a human keystrokes were left out. The reasoning and a runnable proof for each
 # one live in README.md, along with what was rejected and why.
+#
+# Run ./verify.sh to watch each one beat the alternative on your own machine.
+
+# ---------------------------------------------------------------- start here
+# These four carry most of the value. None depends on the agent remembering to
+# reach for it at the right moment.
 
 # Proxy that filters verbose command output before it reaches the model.
 # Token cost is the binding constraint on how long an agent can stay useful.
 brew "rtk"
 
-# Structural search and rewrite over a parsed syntax tree.
-# Regex silently misses code split across lines and silently matches comments.
-brew "ast-grep"
+# Python package and script runner.
+# `pip install` into macOS system Python fails outright (externally-managed).
+# The agent's fallbacks are all bad: a leaking venv, --break-system-packages,
+# or giving up. `uv run --with X` is ephemeral and leaves nothing behind.
+brew "uv"
 
 # Find-and-replace with literal and PCRE modes.
 # BSD sed on macOS rejects the GNU `sed -i 's/…/…/' file` form every agent writes.
 brew "sd"
+
+# Structural search and rewrite over a parsed syntax tree.
+# Regex silently misses code split across lines and silently matches comments.
+brew "ast-grep"
+
+# ------------------------------------------------------------------ the rest
+# Each closes a real case, but a narrower or more situational one.
+
+# GitHub CLI.
+# One typed field instead of half a megabyte of markup-pinned HTML.
+brew "gh"
+
+# JSON processor.
+# Agents parse JSON tool output constantly; regex over JSON breaks on nesting and escapes.
+brew "jq"
+
+# Secret scanner for the working tree and full git history.
+# Agents copy live values out of .env into fixtures to make a test pass, then
+# commit them. Irreversible once pushed — the key has to be rotated, not removed.
+brew "gitleaks"
+
+# Static checker for GitHub Actions workflows.
+# Without it the agent's only feedback on a workflow edit is push, wait, read CI.
+# Also runs shellcheck over `run:` blocks, so it composes with the entry below.
+brew "actionlint"
 
 # Static analysis for shell.
 # Agent-written shell fails late, in production, on the branch nobody reran.
@@ -29,14 +62,6 @@ brew "difftastic"
 # YAML/TOML/XML processor that preserves comments and anchors.
 # Line-based edits to config files drop comments or produce valid-but-different files.
 brew "yq"
-
-# JSON processor.
-# Agents parse JSON tool output constantly; regex over JSON breaks on nesting and escapes.
-brew "jq"
-
-# GitHub CLI.
-# Agents reach for PRs, issues and CI status; without it they scrape HTML or guess.
-brew "gh"
 
 # Statistical command-line benchmarking.
 # "It got faster" without a measurement is a claim, not a result.

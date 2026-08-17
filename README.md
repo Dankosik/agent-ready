@@ -1,8 +1,8 @@
 # agent-ready
 
-![license MIT](https://img.shields.io/badge/license-MIT-blue) ![platform macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![9 tools](https://img.shields.io/badge/tools-9-brightgreen)
+![license MIT](https://img.shields.io/badge/license-MIT-blue) ![platform macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![12 tools](https://img.shields.io/badge/tools-12-brightgreen)
 
-**Set up macOS for coding with AI agents — Claude Code, Codex, Cursor — in one command.** Nine CLI tools installed with Homebrew, each chosen for one reason, each with a proof you can run in under a minute.
+**Set up macOS for coding with AI agents — Claude Code, Codex, Cursor — in one command.** Twelve CLI tools installed with Homebrew, each chosen for one reason, each with a proof you can run in under a minute.
 
 ```bash
 git clone https://github.com/Dankosik/agent-ready && cd agent-ready && brew bundle
@@ -21,17 +21,18 @@ hello
 
 The file is unchanged. On macOS, BSD `sed` reads the argument after `-i` as a backup-file suffix, so the substitution became the suffix and your filename became the script. It errors — with a message that depends on your path — and the edit never happens.
 
-That is one entry out of nine. Every tool here removes a way for an agent to be **confidently wrong**, or measurably changes how well it works. Convenience tools were cut, and [what was rejected](#considered-and-rejected) is listed with reasons.
+That is one entry out of twelve. Every tool here removes a way for an agent to be **confidently wrong**, or measurably changes how well it works. Convenience tools were cut, and [what was rejected](#considered-and-rejected) is listed with reasons.
 
 ## What gets installed
 
-The nine are not equally load-bearing, and a flat list would imply they are.
+The twelve are not equally load-bearing, and a flat list would imply they are.
 
-**Start here.** These three carry most of the value, and none of them depends on you remembering to reach for it at the right moment:
+**Start here.** These four carry most of the value, and none of them depends on you remembering to reach for it at the right moment:
 
 | Tool | Why it is here |
 |---|---|
 | **rtk** | Filters verbose command output before it reaches the model — automatically, on every command |
+| **uv** | `pip install` fails outright on macOS system Python; every fallback the agent picks is worse |
 | **sd** | `sed -i` does not edit files on macOS; the alternative is not worse, it is broken |
 | **ast-grep** | Structural search; a regex that misses code split across lines reports "no matches" and raises nothing |
 
@@ -41,6 +42,8 @@ The nine are not equally load-bearing, and a flat list would imply they are.
 |---|---|
 | **gh** | One typed field instead of half a megabyte of HTML |
 | **jq** | Regex over JSON breaks on nesting and escaping |
+| **gitleaks** | Agents copy live keys into fixtures and commit them; pushing is irreversible |
+| **actionlint** | Workflow edits otherwise cost a push-and-wait round trip per typo |
 | **shellcheck** | Shell has no compiler; mistakes surface in CI |
 | **difftastic** | Separates reformatting from a real edit |
 | **yq** | Line edits drop YAML comments and anchors |
@@ -72,9 +75,34 @@ rtk gain                      # what it has actually saved you so far
 rtk hook check "git status"   # dry-run: see how a command gets rewritten
 ```
 
-Upstream claims 60–90% reduction on common dev commands; `rtk gain` is how you check that against your own history rather than taking the number on faith.
+Upstream claims 60–90% reduction on common dev commands.
 
-This is the one entry about capacity rather than correctness, and it earns the line: everything else here only matters while the agent still has room to think.
+**Treat `rtk gain` as indicative, not as proof.** It reports on the commands it proxied and cannot see the `| head -20` the agent appends afterwards, so its aggregate overstates the saving — one user reports it reading ~100% for exactly that reason. `./verify.sh` measures a single command's output both ways instead, which is the number you can actually stand behind.
+
+Worth knowing before you adopt it: [an end-to-end evaluation of this whole tool category](https://www.peterbaumgartner.com/blog/e2e-evals-agents/) found context-saving tools tend to get *stacked on top of* normal file reads rather than replacing them, and reports rtk occasionally leaving an agent unable to confirm a task was complete. This is the one entry here about capacity rather than correctness, and it is the one to watch.
+
+</details>
+
+<details>
+<summary><b>uv</b> — the agent's Python fallbacks are all bad ones</summary>
+
+An agent needs a throwaway script with a third-party library — parse a large JSON dump, generate fixtures, poke an API to check a claim. It writes the command everyone writes:
+
+```console
+$ pip3 install humanize
+error: externally-managed-environment
+× This environment is externally managed
+```
+
+That is macOS refusing to let anything install into the system interpreter. The agent now picks one of three bad options: create a venv (state that outlives the session and that nobody cleans up), pass `--break-system-packages` (which does what it says), or give up and write something worse in bash.
+
+```bash
+uv run --with humanize report.py
+```
+
+Ephemeral environment, nothing installed globally, nothing left behind. `uvx <tool>` does the same for any Python CLI without installing it.
+
+The adoption signal here is unusually strong: independent projects — Armin Ronacher's agent scripts and Trail of Bits' Python skill among them — ship PATH shims that intercept `pip`, `poetry` and `python` and redirect them to `uv`. People are not merely installing it, they are forcing their agents onto it.
 
 </details>
 
@@ -117,6 +145,55 @@ echo hello > /tmp/t && sd hello world /tmp/t && cat /tmp/t   # world
 ```
 
 No `-i`, no suffix ambiguity, no BRE/ERE guessing, and `-F` for literal strings when the pattern is full of metacharacters.
+
+</details>
+
+<details>
+<summary><b>gitleaks</b> — the agent copies a live key into a fixture to make a test pass</summary>
+
+The scenario is specific and it happens: the agent is fixing a failing integration test, sees working values in `.env`, and copies them into the test file. The commit goes through. Nothing complains.
+
+Pushing makes it irreversible in the way that matters — rewriting history does not un-leak a key that was public for ten minutes. It has to be rotated.
+
+```bash
+gitleaks detect --source . -v
+```
+
+Scans the working tree and the full history, and names the rule, file, line and commit:
+
+```
+RuleID: github-pat        config_test.go:6
+RuleID: aws-access-token  config_test.go:4
+RuleID: generic-api-key   config_test.go:5
+```
+
+It is also disciplined about false positives — it deliberately ignores the well-known documentation examples like `AKIAIOSFODNN7EXAMPLE`, which is what keeps it from being switched off after a week.
+
+The agent-era part is documented rather than hypothetical: Claude Code has been [reported reading `.env` despite `.claudeignore`](https://www.theregister.com/2026/01/28/claude_code_ai_secrets_files/), and one measured survey found live secrets in the history of 2.4% of repositories carrying AI-tool config directories. In a pre-commit hook this becomes a feedback loop the agent can correct against by itself.
+
+</details>
+
+<details>
+<summary><b>actionlint</b> — a workflow typo costs a push and a wait</summary>
+
+When an agent edits `.github/workflows/*.yml`, its only feedback loop is commit, push, wait for the runner, read the log. Minutes per iteration, and CI minutes burned on typos.
+
+```bash
+actionlint
+```
+
+On a deliberately broken workflow:
+
+```
+ci.yml:7:33  "github.event.issue.title" is potentially untrusted. avoid using it
+             directly in inline scripts                            [expression]
+ci.yml:9:9   shellcheck reported issue in this script:
+             SC2086: Double quote to prevent globbing              [shellcheck]
+```
+
+The first is a security class, not a style nit: someone files an issue whose title contains shell metacharacters, and your workflow runs it. The second shows the property that earns it a line here — actionlint invokes **shellcheck** on `run:` blocks, so it extends a tool already on this list into a place that tool could not otherwise reach.
+
+Honest limit: it did not catch a third planted bug, a typo in a context property name. Two out of three.
 
 </details>
 
@@ -234,6 +311,17 @@ npx ccusage@latest
 
 </details>
 
+<details>
+<summary><b>jj, if you are willing to change version control</b> — agents delete untracked work</summary>
+
+The failure is well documented, including a verbatim agent apology: *"I accidentally removed your untracked files with git clean, which wasn't my intention."* Git-based checkpointing cannot undo it, because the files were never tracked. Claude Code's own worktree isolation has [deleted gitignored directories from the main tree](https://github.com/anthropics/claude-code/issues/75490) — gigabytes, unrecoverable for the same reason.
+
+[`jj`](https://github.com/jj-vcs/jj) snapshots the working copy into an operation log on every `jj` command, so `jj undo` reaches work that git never saw. It colocates with an existing git repository.
+
+It is out of the Brewfile because it is a change of version control system, not a utility you install and forget — and because it only snapshots when a `jj` command runs, so unattended agents need a hook to trigger one.
+
+</details>
+
 ## Considered and rejected
 
 <details>
@@ -252,6 +340,19 @@ npx ccusage@latest
 
 </details>
 
+## Formula names that install the wrong thing
+
+Found while checking candidates for this list. Each of these is a plausible thing to type after reading a recommendation, and each installs something other than what you meant:
+
+| You type | You get |
+|---|---|
+| `brew install crystal` | The Crystal programming language — not any agent tool |
+| `brew install amp` | A terminal text editor — not Sourcegraph's Amp |
+| `brew install trash` | A different utility from `trash-cli`, which is keg-only and conflicts with `macos-trash` |
+| `brew install mods` | Archived upstream since early 2026 |
+
+A related habit worth borrowing: **GitHub stars are a poor proxy for whether a tool is used.** Homebrew publishes install counts, and the gap can be enormous — one widely-starred agent sandbox has 4,000 stars and 18 installs a month. Check `https://formulae.brew.sh/api/formula/<name>.json` before believing a recommendation, including the ones on this page.
+
 ## Scope and maintenance
 
 <details>
@@ -265,7 +366,7 @@ npx ccusage@latest
 
 A Brewfile is not a lockfile — Homebrew formulae roll forward, so this installs current versions rather than the ones recorded here.
 
-**Snapshot: 2026-08-17.** Verified against rtk 0.45.0, ast-grep 0.45.1, sd 1.1.0, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, hyperfine 1.20.0.
+**Snapshot: 2026-08-17.** Verified against rtk 0.45.0, uv 0.11.1, sd 1.1.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, hyperfine 1.20.0.
 
 Treat this as a dated snapshot with its reasoning attached, not a maintained index. PRs adding a tool are welcome when they carry a runnable proof of what it prevents or measurably improves. PRs that only assert a tool is good will be closed with a link to this line — that rule is what keeps the list short enough to be worth reading.
 
