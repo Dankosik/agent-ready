@@ -31,48 +31,194 @@ routing="${root}/agent-routing.md"
 	exit 1
 }
 
+command -v rtk >/dev/null 2>&1 || {
+	printf 'rtk is not installed; run %s first\n' "$0" >&2
+	exit 1
+}
+
 start='<!-- agent-ready:start -->'
 end='<!-- agent-ready:end -->'
 
+resolve_target() {
+	local path="$1" link dir hops=0
+	while [ -L "${path}" ]; do
+		hops=$((hops + 1))
+		[ "${hops}" -le 20 ] || {
+			printf 'too many symlinks while resolving %s\n' "$1" >&2
+			return 1
+		}
+		link=$(readlink "${path}")
+		case "${link}" in
+		/*) path="${link}" ;;
+		*)
+			dir=$(cd -- "$(dirname -- "${path}")" && pwd -P)
+			path="${dir}/${link}"
+			;;
+		esac
+	done
+	printf '%s\n' "${path}"
+}
+
+block_state() {
+	awk -v s="${start}" -v e="${end}" '
+		$0 == s { starts++; start_line = NR }
+		$0 == e { ends++; end_line = NR }
+		END {
+			if (starts == 0 && ends == 0) print "absent"
+			else if (starts == 1 && ends == 1 && start_line < end_line) print "present"
+			else print "invalid"
+		}
+	' "$1"
+}
+
 install_block() {
-	local target="$1" label="$2" tmp
+	local requested="$1" label="$2" target tmp state
+	mkdir -p "$(dirname -- "${requested}")"
+	target=$(resolve_target "${requested}")
 	mkdir -p "$(dirname -- "${target}")"
 	[ -f "${target}" ] || : >"${target}"
+	state=$(block_state "${target}")
+	[ "${state}" != invalid ] || {
+		printf '%s: malformed agent-ready markers in %s\n' "${label}" "${requested}" >&2
+		return 1
+	}
 
 	tmp=$(mktemp "${target}.XXXXXX") || return 1
-	if grep -qF "${start}" "${target}"; then
-		# Replace the managed block in place; keep everything around it.
+	cp -p "${target}" "${tmp}"
+	if [ "${state}" = present ]; then
 		awk -v s="${start}" -v e="${end}" -v f="${routing}" '
-			index($0, s) { print; while ((getline line < f) > 0) print line; skip = 1; next }
-			index($0, e) { skip = 0 }
+			$0 == s { print; while ((getline line < f) > 0) print line; skip = 1; next }
+			$0 == e { skip = 0 }
 			!skip { print }
 		' "${target}" >"${tmp}"
-		printf '%s: refreshed routing block in %s\n' "${label}" "${target}"
 	else
-		cat "${target}" >"${tmp}"
-		[ -s "${tmp}" ] && printf '\n' >>"${tmp}"
 		{
+			cat "${target}"
+			[ -s "${target}" ] && printf '\n'
 			printf '%s\n' "${start}"
 			cat "${routing}"
 			printf '%s\n' "${end}"
-		} >>"${tmp}"
-		printf '%s: added routing block to %s\n' "${label}" "${target}"
+		} >"${tmp}"
+	fi
+	if cmp -s "${target}" "${tmp}"; then
+		rm -f "${tmp}"
+		printf '%s: routing already configured in %s\n' "${label}" "${requested}"
+		return 0
 	fi
 	mv "${tmp}" "${target}"
+	printf '%s: %s routing block in %s\n' "${label}" "$([ "${state}" = present ] && printf refreshed || printf added)" "${requested}"
+}
+
+remove_block() {
+	local requested="$1" label="$2" target tmp state
+	[ -e "${requested}" ] || [ -L "${requested}" ] || return 0
+	target=$(resolve_target "${requested}")
+	[ -f "${target}" ] || return 0
+	state=$(block_state "${target}")
+	[ "${state}" != invalid ] || {
+		printf '%s: malformed agent-ready markers in %s\n' "${label}" "${requested}" >&2
+		return 1
+	}
+	[ "${state}" = present ] || return 0
+	tmp=$(mktemp "${target}.XXXXXX") || return 1
+	cp -p "${target}" "${tmp}"
+	awk -v s="${start}" -v e="${end}" '
+		$0 == s { skip = 1; next }
+		$0 == e { skip = 0; next }
+		!skip { print }
+	' "${target}" >"${tmp}"
+	mv "${tmp}" "${target}"
+	printf '%s: removed legacy routing block from %s\n' "${label}" "${requested}"
+}
+
+configure_rtk() {
+	local label="$1"
+	shift
+	rtk init "$@"
+	printf '%s: configured RTK integration\n' "${label}"
+}
+
+install_cursor_hook() {
+	local cursor_dir="${HOME}/.cursor" response hooks requested tmp command
+	command -v jq >/dev/null 2>&1 || {
+		printf 'Cursor: jq is required to merge hooks.json\n' >&2
+		return 1
+	}
+	mkdir -p "${cursor_dir}/hooks"
+
+	response="${cursor_dir}/hooks/agent-ready-session-start.json"
+	tmp=$(mktemp "${response}.XXXXXX") || return 1
+	jq -Rs '{additional_context: .}' "${routing}" >"${tmp}"
+	if [ -f "${response}" ] && cmp -s "${response}" "${tmp}"; then
+		rm -f "${tmp}"
+	else
+		mv "${tmp}" "${response}"
+	fi
+
+	requested="${cursor_dir}/hooks.json"
+	hooks=$(resolve_target "${requested}")
+	mkdir -p "$(dirname -- "${hooks}")"
+	tmp=$(mktemp "${hooks}.XXXXXX") || return 1
+	command='cat ./hooks/agent-ready-session-start.json'
+	if [ -f "${hooks}" ]; then
+		cp -p "${hooks}" "${tmp}"
+		jq --arg command "${command}" '
+			if type != "object" then error("hooks.json root must be an object") else . end
+			| .hooks = (.hooks // {})
+			| if ((.hooks.sessionStart // []) | type) != "array"
+				then error("hooks.sessionStart must be an array") else . end
+			| .version = (.version // 1)
+			| .hooks.sessionStart = ([.hooks.sessionStart[]?
+				| select((type != "object") or (.command != $command))]
+				+ [{"command": $command}])
+		' "${hooks}" >"${tmp}" || {
+			rm -f "${tmp}"
+			return 1
+		}
+	else
+		jq -n --arg command "${command}" '{version: 1, hooks: {sessionStart: [{command: $command}]}}' >"${tmp}"
+	fi
+	if [ -f "${hooks}" ] && cmp -s "${hooks}" "${tmp}"; then
+		rm -f "${tmp}"
+		printf 'Cursor: routing hook already configured in %s\n' "${requested}"
+	else
+		chmod 600 "${tmp}"
+		mv "${tmp}" "${hooks}"
+		printf 'Cursor: configured routing hook in %s\n' "${requested}"
+	fi
+
+	remove_block "${cursor_dir}/AGENTS.md" "Cursor"
 }
 
 found=0
-command -v claude >/dev/null 2>&1 && {
+if command -v claude >/dev/null 2>&1; then
 	found=1
-	install_block "${HOME}/.claude/CLAUDE.md" "Claude Code"
-}
-command -v codex >/dev/null 2>&1 && {
+	configure_rtk "Claude Code" -g --hook-only --auto-patch --no-trust-filters
+	install_block "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" "Claude Code"
+fi
+if command -v codex >/dev/null 2>&1; then
 	found=1
-	install_block "${HOME}/.codex/AGENTS.md" "Codex"
-}
-command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 && {
+	configure_rtk "Codex" -g --codex --no-trust-filters
+	install_block "${CODEX_HOME:-${HOME}/.codex}/AGENTS.md" "Codex"
+fi
+if command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 || [ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]; then
 	found=1
-	install_block "${HOME}/.cursor/AGENTS.md" "Cursor"
-}
+	configure_rtk "Cursor" -g --agent cursor --hook-only --auto-patch --no-trust-filters
+	install_cursor_hook
+fi
+if command -v gemini >/dev/null 2>&1; then
+	found=1
+	configure_rtk "Gemini CLI" -g --gemini --hook-only --auto-patch --no-trust-filters
+	install_block "${HOME}/.gemini/GEMINI.md" "Gemini CLI"
+fi
+if command -v copilot >/dev/null 2>&1; then
+	found=1
+	configure_rtk "GitHub Copilot CLI" -g --copilot --hook-only --auto-patch --no-trust-filters
+	install_block "${COPILOT_HOME:-${HOME}/.copilot}/copilot-instructions.md" "GitHub Copilot CLI"
+fi
+if command -v windsurf >/dev/null 2>&1 || [ -d /Applications/Windsurf.app ] || [ -d "${HOME}/Applications/Windsurf.app" ]; then
+	found=1
+	install_block "${HOME}/.codeium/windsurf/memories/global_rules.md" "Windsurf"
+fi
 
 [ "${found}" -eq 1 ] || printf 'No supported harness found; rerun %s --configure-only after installing one\n' "$0"

@@ -1,6 +1,6 @@
 <h1 align="center">agent-ready</h1>
 
-<p align="center"><strong>Reliable command-line tooling for Claude Code, Codex, and Cursor on macOS.</strong></p>
+<p align="center"><strong>Reliable command-line tooling for popular coding agents on macOS.</strong></p>
 
 <p align="center">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
@@ -73,18 +73,23 @@ Coding agents usually choose the command they already know. In the transcript sa
 ./install.sh
 ├── Brewfile
 │   └── installs 14 generic tools
+├── rtk init
+│   └── installs each detected agent's native RTK integration
 └── agent-routing.md
     ├── ~/.claude/CLAUDE.md
     ├── ~/.codex/AGENTS.md
-    └── ~/.cursor/AGENTS.md
+    ├── ~/.gemini/GEMINI.md
+    ├── ~/.copilot/copilot-instructions.md
+    ├── ~/.codeium/windsurf/memories/global_rules.md
+    └── ~/.cursor/hooks.json (sessionStart context)
 ```
 
-The routing rules live between `<!-- agent-ready:start -->` and `<!-- agent-ready:end -->`. Existing content outside those markers stays untouched. Running the installer again refreshes the managed block instead of duplicating it.
+The installer detects Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI, and Windsurf. Routing rules live between `<!-- agent-ready:start -->` and `<!-- agent-ready:end -->`; existing content outside those markers stays untouched. Running the installer again refreshes the managed block instead of duplicating it. Cursor uses its documented global `sessionStart` hook because `AGENTS.md` is project-scoped there.
 
 > [!TIP]
 > If the tools are already installed, run `./install.sh --configure-only` to refresh only the instructions.
 
-`rtk` needs no routing rule because it hooks shell calls directly. Language servers register through their language adapters.
+`rtk` is configured through its own agent-specific `rtk init` commands. Language servers register through their language adapters.
 
 ## Tools
 
@@ -125,9 +130,10 @@ Convenience alone is not enough for a tool to enter the generic [`Brewfile`](Bre
 
 ```bash
 ./verify.sh
+./test-install.sh
 ```
 
-The script creates temporary fixtures, prints both results, and removes the fixtures when it exits. It does not install, remove, or configure anything.
+`verify.sh` compares each tool with its familiar fallback. `test-install.sh` runs the installer twice against an isolated home directory and checks preservation, replacement, deduplication, symlink handling, malformed-marker safety, Cursor hook merging, and RTK initialization. Neither script changes your real agent configuration.
 
 | Without the tool | With the tool |
 |---|---|
