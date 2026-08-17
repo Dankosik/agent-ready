@@ -70,6 +70,10 @@ for target in \
 	[ "$(rg -c '^<!-- agent-ready:start -->$' "${target}")" -eq 1 ]
 	[ "$(rg -c '^<!-- agent-ready:end -->$' "${target}")" -eq 1 ]
 	rg -q '^Tool routing:$' "${target}"
+	if rg -q '^- Go:' "${target}"; then
+		printf 'generic install unexpectedly included Go routing in %s\n' "${target}" >&2
+		exit 1
+	fi
 done
 
 rg -q '^user claude$' "${fake_home}/.claude/CLAUDE.md"
@@ -89,6 +93,20 @@ jq -e '
 	([.hooks.sessionStart[] | select(.command == "cat ./hooks/agent-ready-session-start.json")] | length) == 1
 ' "${fake_home}/.cursor/hooks.json" >/dev/null
 jq -e '.additional_context | contains("Tool routing:")' \
+	"${fake_home}/.cursor/hooks/agent-ready-session-start.json" >/dev/null
+
+mkdir -p "${fake_home}/.config/agent-ready/languages"
+printf 'enabled\n' >"${fake_home}/.config/agent-ready/languages/go"
+run_install
+for target in \
+	"${fake_home}/.claude/CLAUDE.md" \
+	"${fake_home}/.codex/AGENTS.md" \
+	"${fake_home}/.gemini/GEMINI.md" \
+	"${fake_home}/.copilot/copilot-instructions.md" \
+	"${fake_home}/.codeium/windsurf/memories/global_rules.md"; do
+	[ "$(rg -c '^- Go:' "${target}")" -eq 1 ]
+done
+jq -e '.additional_context | contains("- Go:")' \
 	"${fake_home}/.cursor/hooks/agent-ready-session-start.json" >/dev/null
 
 for expected in \

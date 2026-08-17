@@ -25,11 +25,30 @@ esac
 # otherwise. This writes that "something" into each harness's instruction file,
 # between markers, leaving everything else in the file untouched.
 
-routing="${root}/agent-routing.md"
-[ -f "${routing}" ] || {
-	printf 'missing %s\n' "${routing}" >&2
+base_routing="${root}/agent-routing.md"
+[ -f "${base_routing}" ] || {
+	printf 'missing %s\n' "${base_routing}" >&2
 	exit 1
 }
+routing="${base_routing}"
+routing_tmp=
+agent_ready_config="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready"
+if [ -f "${agent_ready_config}/languages/go" ]; then
+	go_routing="${root}/languages/go/agent-routing.md"
+	[ -f "${go_routing}" ] || {
+		printf 'missing %s\n' "${go_routing}" >&2
+		exit 1
+	}
+	routing_tmp=$(mktemp)
+	{
+		cat "${base_routing}"
+		printf '\n'
+		cat "${go_routing}"
+	} >"${routing_tmp}"
+	routing="${routing_tmp}"
+fi
+cleanup_routing() { [ -z "${routing_tmp}" ] || rm -f "${routing_tmp}"; }
+trap cleanup_routing EXIT
 
 command -v rtk >/dev/null 2>&1 || {
 	printf 'rtk is not installed; run %s first\n' "$0" >&2

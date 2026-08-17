@@ -87,6 +87,15 @@ if [ -n "${cursor_config}" ]; then
 	fi
 fi
 
+agent_ready_config="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready"
+mkdir -p "${agent_ready_config}/languages"
+printf 'enabled\n' >"${agent_ready_config}/languages/go"
+if command -v rtk >/dev/null 2>&1; then
+	"${root}/../../install.sh" --configure-only
+else
+	printf 'Go routing will be applied after the base agent-ready installer runs\n'
+fi
+
 if [ "${found}" -eq 0 ]; then
 	printf 'No supported harness found; rerun %s --configure-only after installing one\n' "$0"
 fi

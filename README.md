@@ -178,7 +178,9 @@ Language-specific tools stay outside the generic `Brewfile`. The Go adapter has 
 ./languages/go/verify.sh
 ```
 
-It installs the official [`gopls`](https://go.dev/gopls/features/mcp) language server and registers `gopls mcp` with each supported agent it finds. This gives the agent compiler-backed workspace discovery, diagnostics, references, rename, code search, and vulnerability checks.
+It installs the official [`gopls`](https://go.dev/gopls/features/mcp) language server and registers `gopls mcp` with each supported agent it finds. This gives the agent compiler-backed workspace discovery, symbol search, file and package context, references, diagnostics, and vulnerability checks.
+
+`gopls` does not publish its model instructions automatically. Installing the Go adapter enables its own managed routing line; the language-independent installer does not load language instructions. The route stays concise: use gopls for build-aware Go semantics, `rg` for literal text, and `ast-grep` for syntax shapes.
 
 To register an existing `gopls` installation without running Homebrew:
 
