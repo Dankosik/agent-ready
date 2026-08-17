@@ -34,7 +34,7 @@ That is one entry out of nine. Every tool here removes a way for an agent to be 
 | **difftastic** | Separates reformatting from a real edit |
 | **yq** | Line edits drop YAML comments and anchors |
 | **jq** | Regex over JSON breaks on nesting and escaping |
-| **gh** | Structured GitHub data instead of scraped HTML |
+| **gh** | One typed field instead of half a megabyte of HTML |
 | **hyperfine** | Turns "it got faster" into a measurement |
 
 Expand any entry for the reasoning and a command that checks it.
@@ -153,9 +153,17 @@ Agents read JSON constantly: `gh` output, API responses, tool manifests. A regex
 </details>
 
 <details>
-<summary><b>gh</b> — structured GitHub data instead of scraped HTML</summary>
+<summary><b>gh</b> — scraping works, right up until the markup changes</summary>
 
-Agents routinely need PR state, review comments, CI results, issue bodies. With `gh` that is one authenticated call returning structured data. Without it they fetch HTML or invent the answer.
+Agents routinely need PR state, review comments, CI results, issue bodies.
+
+Unlike the other entries here, this one is not about being wrong. Scraping the star count off a repository page actually returns the right number — I checked. It costs 522 KB of HTML and a regex pinned to today's markup, against one authenticated call returning a typed field:
+
+```bash
+gh api repos/rtk-ai/rtk --jq .stargazers_count
+```
+
+The failure is deferred rather than absent. A regex over rendered HTML keeps working until GitHub ships a redesign, and then it starts returning nothing or the wrong element — with no error, because a regex that matches the wrong thing looks exactly like a regex that matches the right thing.
 
 </details>
 
