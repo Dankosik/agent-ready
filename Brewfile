@@ -41,6 +41,11 @@ brew "ast-grep"
 # One typed field instead of half a megabyte of markup-pinned HTML.
 brew "gh"
 
+# Git worktree manager.
+# Shows dirty, divergent, locked, prunable, and integrated state across worktrees
+# before an agent switches, merges, or removes one.
+brew "worktrunk"
+
 # JSON processor.
 # Agents parse JSON tool output constantly; regex over JSON breaks on nesting and escapes.
 brew "jq"

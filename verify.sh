@@ -316,6 +316,31 @@ check_gh() {
 	pass=$((pass + 1))
 }
 
+# ---------------------------------------------------------- worktrunk
+check_worktrunk() {
+	have wt || return 0
+	rule worktrunk
+	local repo="${work}/worktrunk" feature="${work}/worktrunk-feature" native structured
+	mkdir -p "${repo}"
+	git -C "${repo}" init -q -b main
+	printf 'base\n' >"${repo}/tracked.txt"
+	git -C "${repo}" add tracked.txt
+	git -C "${repo}" -c user.email=v@v -c user.name=v commit -qm init
+	git -C "${repo}" worktree add -q -b feature "${feature}"
+	printf 'dirty\n' >>"${feature}/tracked.txt"
+
+	native=$(git -C "${repo}" worktree list --porcelain)
+	structured=$(wt -C "${repo}" list --format=json --config-set list.json-schema=2)
+	row "without" "git worktree list → $(printf '%s\n' "${native}" | rg -c '^worktree ') paths; no dirty state"
+	row "with" "wt list JSON → feature dirty=$(printf '%s' "${structured}" | jq -r '.items[] | select(.branch == "feature") | .worktree.changes.modified')"
+	row "verdict" "one inventory exposes unsafe state before switch, merge, or removal"
+	printf '%s' "${structured}" | jq -e '
+		.schema == 2 and
+		([.items[] | select(.branch == "feature" and .worktree.changes.modified)] | length) == 1
+	' >/dev/null
+	pass=$((pass + 1))
+}
+
 # ---------------------------------------------------------- hyperfine
 check_hyperfine() {
 	have hyperfine || return 0
@@ -340,6 +365,7 @@ check_sd
 check_ripgrep
 check_ast_grep
 check_gh
+check_worktrunk
 check_jq
 check_gitleaks
 check_actionlint

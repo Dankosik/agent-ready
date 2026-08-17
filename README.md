@@ -5,7 +5,7 @@
 <p align="center">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="platform macOS" src="https://img.shields.io/badge/platform-macOS-lightgrey">
-  <img alt="14 generic tools" src="https://img.shields.io/badge/generic_tools-14-brightgreen">
+  <img alt="15 generic tools" src="https://img.shields.io/badge/generic_tools-15-brightgreen">
 </p>
 
 <p align="center">
@@ -72,7 +72,7 @@ Coding agents usually choose the command they already know. In the transcript sa
 ```text
 ./install.sh
 ├── Brewfile
-│   └── installs 14 generic tools
+│   └── installs 15 generic tools
 ├── rtk init
 │   └── installs each detected agent's native RTK integration
 └── agent-routing.md
@@ -113,11 +113,12 @@ These five cover the broadest failure modes.
 | [`actionlint`](https://github.com/rhysd/actionlint) | GitHub Actions errors before a CI run |
 | [`shellcheck`](https://www.shellcheck.net/) | Shell errors before runtime or CI |
 
-### Data, GitHub, and measurement
+### Data, GitHub, worktrees, and measurement
 
 | Tool | What it changes |
 |---|---|
 | [`gh`](https://cli.github.com/) | Reads typed GitHub data instead of scraping HTML |
+| [`worktrunk`](https://worktrunk.dev/) | Shows worktree state and manages safe create, switch, merge, and removal workflows |
 | [`jq`](https://jqlang.org/) | Reads and transforms JSON safely |
 | [`yq`](https://mikefarah.gitbook.io/yq/) | Reads and edits YAML, TOML, and XML without line-based parsing |
 | [`mdq`](https://github.com/yshavit/mdq) | Reads Markdown sections by heading instead of stale line ranges |
@@ -142,6 +143,7 @@ Convenience alone is not enough for a tool to enter the generic [`Brewfile`](Bre
 | `sed -i` leaves a macOS file unchanged | `sd` performs the replacement |
 | a secret enters Git history | `gitleaks` identifies the rule, file, and commit |
 | a workflow typo requires a push and CI run | `actionlint` reports it locally |
+| `git worktree list` omits dirty and divergence state | `wt list` returns one structured worktree inventory |
 | a shifted Markdown file makes a cached line range read the wrong text | `mdq` selects the complete section by heading |
 
 <details>
@@ -197,9 +199,9 @@ To register an existing `gopls` installation without running Homebrew:
 Pull requests that add a tool should include a runnable proof of the failure it prevents or the improvement it makes.
 
 <details>
-<summary><strong>Verified versions, 2026-08-17</strong></summary>
+<summary><strong>Verified versions, 2026-08-18</strong></summary>
 
-Generic tools: rtk 0.45.0, uv 0.11.1, sd 1.1.0, ripgrep 15.2.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, mdq 0.10.0, and hyperfine 1.20.0.
+Generic tools: rtk 0.45.0, uv 0.11.1, sd 1.1.0, ripgrep 15.2.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, mdq 0.10.0, worktrunk 0.74.0, and hyperfine 1.20.0.
 
 Go adapter: gopls 0.23.0.
 
