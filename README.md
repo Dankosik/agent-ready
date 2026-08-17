@@ -25,19 +25,40 @@ That is one entry out of nine. Every tool here removes a way for an agent to be 
 
 ## What gets installed
 
+The nine are not equally load-bearing, and a flat list would imply they are.
+
+**Start here.** These three carry most of the value, and none of them depends on you remembering to reach for it at the right moment:
+
 | Tool | Why it is here |
 |---|---|
-| **rtk** | Filters verbose command output before it reaches the model |
-| **ast-grep** | Structural search; regex misses code split across lines |
-| **sd** | `sed -i` does not work on macOS |
+| **rtk** | Filters verbose command output before it reaches the model — automatically, on every command |
+| **sd** | `sed -i` does not edit files on macOS; the alternative is not worse, it is broken |
+| **ast-grep** | Structural search; a regex that misses code split across lines reports "no matches" and raises nothing |
+
+**The rest.** Each closes a real case, but a narrower or more situational one:
+
+| Tool | Why it is here |
+|---|---|
+| **gh** | One typed field instead of half a megabyte of HTML |
+| **jq** | Regex over JSON breaks on nesting and escaping |
 | **shellcheck** | Shell has no compiler; mistakes surface in CI |
 | **difftastic** | Separates reformatting from a real edit |
 | **yq** | Line edits drop YAML comments and anchors |
-| **jq** | Regex over JSON breaks on nesting and escaping |
-| **gh** | One typed field instead of half a megabyte of HTML |
 | **hyperfine** | Turns "it got faster" into a measurement |
 
 Expand any entry for the reasoning and a command that checks it.
+
+## Verify it yourself
+
+Do not take the table on faith — the repository ships the proof:
+
+```bash
+./verify.sh
+```
+
+It runs every tool against the alternative an agent would reach for without it and prints both results side by side. Nothing is installed, removed or configured; fixtures live in a temporary directory deleted on exit.
+
+The `gh` check is included even though it does **not** show a correctness win — scraping returns the right number. A list you can only confirm is not a list worth trusting.
 
 <details>
 <summary><b>rtk</b> — token budget is what limits how long an agent stays useful</summary>
