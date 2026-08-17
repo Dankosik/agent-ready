@@ -1,10 +1,14 @@
-# agent-toolkit — CLI tools that stop coding agents from failing silently.
+# agent-ready — set up a machine for coding with AI agents.
 # Install:  brew bundle
 #
-# Every entry below prevents a class of wrong-but-quiet result, not a class of
-# inconvenience. The reasoning and a reproducible proof for each one live in
-# README.md. Tools that only save keystrokes were deliberately left out; see
-# "Considered and rejected" there.
+# Every entry earns its line: it either prevents a class of wrong-but-quiet
+# result, or measurably changes how well an agent works. Tools that only save
+# a human keystrokes were left out. The reasoning and a runnable proof for each
+# one live in README.md, along with what was rejected and why.
+
+# Proxy that filters verbose command output before it reaches the model.
+# Token cost is the binding constraint on how long an agent can stay useful.
+brew "rtk"
 
 # Structural search and rewrite over a parsed syntax tree.
 # Regex silently misses code split across lines and silently matches comments.

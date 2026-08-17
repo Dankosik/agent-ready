@@ -1,22 +1,37 @@
-# agent-toolkit
+# agent-ready
 
-CLI tools that stop coding agents from failing **silently**, in one `brew bundle`.
+You just opened a fresh machine and you want to code with AI agents on it. This is what to install, and why.
 
 ```bash
-git clone https://github.com/Dankosik/agent-toolkit && cd agent-toolkit && brew bundle
+git clone https://github.com/Dankosik/agent-ready && cd agent-ready && brew bundle
 ```
 
 ## What this is, and what it is not
 
-This is not a list of nice tools. Eight entries survived one filter:
+This is not a list of nice tools. Nine entries survived one filter:
 
-> Does it prevent a class of result that is **wrong and quiet**, or does it merely save keystrokes?
+> Does it prevent a class of result that is **wrong and quiet**, or does it measurably change how well an agent works — as opposed to saving a human keystrokes?
 
-Convenience tools were cut. So were tools that duplicate something an agent already has. The list of what was rejected, and why, is at the bottom — it is the part most such lists omit, and it is the reason this one is short.
+Convenience tools were cut. So were tools that duplicate something an agent already has. What was rejected, and why, is at the bottom — it is the part most such lists omit, and it is the reason this one is short enough to read before you run it.
 
-Every claim below comes with a command you can run in under a minute. If a proof does not reproduce on your machine, that entry does not deserve your disk space.
+Almost every claim below comes with a command you can run in under a minute. If a proof does not reproduce on your machine, that entry does not deserve your disk space.
+
+You are also welcome to read the Brewfile first. It is thirty lines. That is the point.
 
 ## Why each tool
+
+### rtk — token budget is the real constraint
+
+An agent's useful lifetime is bounded by how fast it fills its context. A single `git status`, `ls -R` or test run can spend thousands of tokens on output the model does not need in full.
+
+[rtk](https://github.com/rtk-ai/rtk) sits in front of common commands and filters their output before it reaches the model. It hooks into Claude Code, Codex, Cursor, Copilot and others, so it applies without changing how you or the agent write commands.
+
+```bash
+rtk gain          # what it has actually saved you so far
+rtk hook check "git status"   # dry-run: see how a command gets rewritten
+```
+
+Upstream claims 60–90% reduction on common dev commands; `rtk gain` is how you check that on your own history rather than taking the number on faith. This is the one entry here that is about capacity rather than correctness, and it earns the line: everything else on this list only matters while the agent still has room to think.
 
 ### ast-grep — regex reads text; code has structure
 
@@ -146,13 +161,21 @@ npx ccusage@latest
 | `packnplay` | No license file; cannot be used legally |
 | `semgrep` | Overlaps whatever linter your project already gates on; a second linter is a second source of truth |
 
-## Scope and maintenance
+## Scope
 
-macOS with Homebrew. Language-agnostic by design: anything language-specific belongs to your project, not to a machine-setup file.
+**macOS with Homebrew, for now.** Nothing here is conceptually macOS-only — the tools are cross-platform and the reasoning holds anywhere. Homebrew is simply the shortest path to a working machine today, and shipping one platform that actually works beats three that half-work. Linux and Windows packaging are the obvious next step.
 
-A Brewfile is not a lockfile — Homebrew formulae roll forward, so this installs current versions rather than the ones below.
+**Language-agnostic on purpose.** Anything tied to one language belongs to your project, not to a machine-setup file. The one exception is the language-server note above, and that is a pointer rather than a package.
 
-**Snapshot: 2026-08-17.** Verified against ast-grep 0.45.1, sd 1.1.0, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, hyperfine 1.20.0. Treat it as a dated snapshot with reasoning attached, not a maintained index. Issues and PRs that add a tool are welcome when they bring a reproducible proof of the failure it prevents; ones that only say a tool is good will be closed with a link to this line.
+**Vendor-neutral on purpose.** Nothing here is written by this project. If an entry stops being the best answer, it gets replaced or removed, not defended.
+
+A Brewfile is not a lockfile — Homebrew formulae roll forward, so this installs current versions rather than the ones recorded below.
+
+## Maintenance
+
+**Snapshot: 2026-08-17.** Verified against rtk 0.45.0, ast-grep 0.45.1, sd 1.1.0, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, hyperfine 1.20.0.
+
+Treat this as a dated snapshot with its reasoning attached, not a maintained index. PRs adding a tool are welcome when they carry a runnable proof of what it prevents or measurably improves. PRs that only assert a tool is good will be closed with a link to this line — that rule is what keeps the list short enough to be worth reading.
 
 ## License
 
