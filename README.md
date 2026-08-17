@@ -1,12 +1,14 @@
 # agent-ready
 
-![license MIT](https://img.shields.io/badge/license-MIT-blue) ![platform macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![12 tools](https://img.shields.io/badge/tools-12-brightgreen)
+![license MIT](https://img.shields.io/badge/license-MIT-blue) ![platform macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![12 generic tools](https://img.shields.io/badge/generic_tools-12-brightgreen)
 
-**Set up macOS for coding with AI agents — Claude Code, Codex, Cursor — in one command.** Twelve CLI tools installed with Homebrew, each chosen for one reason, each with a proof you can run in under a minute.
+**Set up macOS for coding with AI agents — Claude Code, Codex, Cursor — in one command.** Twelve language-independent CLI tools installed with Homebrew, each chosen for one reason, each with a proof you can run in under a minute.
 
 ```bash
-git clone https://github.com/Dankosik/agent-ready && cd agent-ready && brew bundle
+git clone https://github.com/Dankosik/agent-ready && cd agent-ready && ./install.sh
 ```
+
+Language-specific tools have separate installers. For Go, run `./languages/go/install.sh` after the generic setup, or run it alone if only the Go adapter is needed.
 
 ## Why this exists
 
@@ -21,7 +23,7 @@ hello
 
 The file is unchanged. On macOS, BSD `sed` reads the argument after `-i` as a backup-file suffix, so the substitution became the suffix and your filename became the script. It errors — with a message that depends on your path — and the edit never happens.
 
-That is one entry out of twelve. Every tool here removes a way for an agent to be **confidently wrong**, or measurably changes how well it works. Convenience tools were cut, and [what was rejected](#considered-and-rejected) is listed with reasons.
+That is one entry out of twelve. Every generic tool here removes a way for an agent to be **confidently wrong**, or measurably changes how well it works. Convenience tools were cut, and [what was rejected](#considered-and-rejected) is listed with reasons.
 
 ## What gets installed
 
@@ -59,7 +61,7 @@ Do not take the table on faith — the repository ships the proof:
 ./verify.sh
 ```
 
-It runs every tool against the alternative an agent would reach for without it and prints both results side by side. Nothing is installed, removed or configured; fixtures live in a temporary directory deleted on exit.
+It runs every generic tool against the alternative an agent would reach for without it and prints both results side by side. Nothing is installed, removed or configured; fixtures live in a temporary directory deleted on exit.
 
 The `gh` check is included even though it does **not** show a correctness win — scraping returns the right number. A list you can only confirm is not a list worth trusting.
 
@@ -276,22 +278,41 @@ hyperfine --warmup 3 'make check'
 
 </details>
 
-## Not in the Brewfile, still worth doing
+## Language adapters
+
+Language adapters are intentionally absent from the generic `Brewfile` and have their own install and verification paths.
 
 <details>
-<summary><b>A language server, wired as MCP</b> — the highest-leverage item here</summary>
+<summary><b>Go: gopls MCP</b> — Go semantics instead of another text search</summary>
 
-For Go that is `gopls`, which since v0.20 speaks MCP directly:
+Install only the Go adapter:
 
 ```bash
-claude mcp add gopls -- gopls mcp
+./languages/go/install.sh
+./languages/go/verify.sh
 ```
 
-Deliberately outside the Brewfile: it is per-language, and registering it as MCP matters more than installing it.
+[`gopls`](https://go.dev/gopls/features/mcp) is the official Go language server. Since v0.20 it can also run as a local MCP server, exposing compiler-backed workspace discovery, package API, diagnostics, symbol references and rename, code search, file context and vulnerability checking. The MCP surface is still marked experimental, so tool names and schemas may change.
 
-As an MCP server its tools appear in the agent's tool schema — the agent cannot fail to know it exists, which is not true of anything you write in an instruction file.
+The installer registers detached stdio mode with every supported harness it finds:
+
+```json
+{"command":"gopls","args":["mcp"]}
+```
+
+Codex is configured globally, Claude Code at user scope, and Cursor in `~/.cursor/mcp.json`. Existing `gopls` entries are left untouched. If `gopls` is already installed, run only the configuration step:
+
+```bash
+./languages/go/install.sh --configure-only
+```
+
+Any other stdio-capable harness can use the JSON definition above. Detached mode reads saved files. `gopls serve -mcp.listen=localhost:8092` can instead share an editor's live LSP session and unsaved buffers, but its lifecycle is editor-specific and is not guessed by the installer.
+
+The server can invoke Go commands including tests, download missing modules into the Go cache and query the vulnerability database when asked. It needs no API key; give it the same trust as local project tooling and do not attach it to an untrusted workspace.
 
 </details>
+
+## Not in the generic Brewfile, still worth doing
 
 <details>
 <summary><b>A sandbox</b> — most people run agents with full access and no prompt</summary>
@@ -360,13 +381,13 @@ A related habit worth borrowing: **GitHub stars are a poor proxy for whether a t
 
 **macOS with Homebrew, for now.** Nothing here is conceptually macOS-only — the tools are cross-platform and the reasoning holds anywhere. Homebrew is simply the shortest path to a working machine today, and shipping one platform that actually works beats three that half-work. Linux and Windows packaging are the obvious next step.
 
-**Language-agnostic on purpose.** Anything tied to one language belongs to your project, not to a machine-setup file. The one exception is the language-server note above, and that is a pointer rather than a package.
+**Separate generic and language-specific installation.** The root `Brewfile`, `install.sh` and `verify.sh` contain only tools that apply across stacks. Each language lives under `languages/<name>/` with its own Brewfile, installer and verification command.
 
 **Vendor-neutral on purpose.** Nothing here is written by this project. If an entry stops being the best answer, it gets replaced or removed, not defended.
 
 A Brewfile is not a lockfile — Homebrew formulae roll forward, so this installs current versions rather than the ones recorded here.
 
-**Snapshot: 2026-08-17.** Verified against rtk 0.45.0, uv 0.11.1, sd 1.1.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, hyperfine 1.20.0.
+**Generic snapshot: 2026-08-17.** Verified against rtk 0.45.0, uv 0.11.1, sd 1.1.0, ast-grep 0.45.1, gitleaks 8.30.1, actionlint 1.7.12, shellcheck 0.11.0, difftastic 0.70.0, yq 4.53.3, hyperfine 1.20.0. The Go adapter was verified against gopls 0.23.0.
 
 Treat this as a dated snapshot with its reasoning attached, not a maintained index. PRs adding a tool are welcome when they carry a runnable proof of what it prevents or measurably improves. PRs that only assert a tool is good will be closed with a link to this line — that rule is what keeps the list short enough to be worth reading.
 

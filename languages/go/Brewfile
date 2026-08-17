@@ -1,0 +1,4 @@
+# Go-specific agent tooling. Install with ./languages/go/install.sh.
+
+# Official Go language server with a native MCP transport.
+brew "gopls"
