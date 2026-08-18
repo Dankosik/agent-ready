@@ -1,18 +1,34 @@
-# agent-ready
+<h1 align="center">agent-ready</h1>
 
-**A practical macOS toolchain for AI coding agents.**
+<p align="center"><strong>Reliable command-line tooling for AI coding agents on macOS.</strong></p>
 
-`agent-ready` installs reliable command-line tools and teaches your coding
-agents when to use them. It helps agents search, edit, validate, and inspect a
-repository without common macOS command incompatibilities or unnecessarily
-verbose output.
+<p align="center">
+  <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
+  <img alt="platform macOS" src="https://img.shields.io/badge/platform-macOS-lightgrey">
+  <img alt="15 generic tools" src="https://img.shields.io/badge/generic_tools-15-brightgreen">
+</p>
 
-It supports Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI, and
-Windsurf.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-the-installer-changes">What it changes</a> ·
+  <a href="#whats-included">Tools</a> ·
+  <a href="#optional-go-support">Go support</a> ·
+  <a href="#verification">Verification</a>
+</p>
 
-## Install
+`agent-ready` installs a practical CLI toolkit and teaches your coding agents
+when to use it. Agents can search, edit, validate, and inspect repositories
+without common macOS command incompatibilities or unnecessarily verbose
+output.
 
-Requirements: macOS and [Homebrew](https://brew.sh/).
+Most setup scripts stop after installing tools. Agents then keep reaching for
+familiar commands such as GNU-style `sed`, noisy `grep`, or regex for parsed
+code. `agent-ready` solves both halves: **the tools and the routing rules**.
+
+## Quick start
+
+> [!NOTE]
+> Requires macOS and [Homebrew](https://brew.sh/).
 
 ```bash
 git clone https://github.com/Dankosik/agent-ready.git
@@ -20,11 +36,11 @@ cd agent-ready
 ./install.sh
 ```
 
-The installer:
+## What the installer changes
 
-1. installs 15 language-independent CLI tools;
-2. detects the coding agents already installed on your machine;
-3. adds concise tool-routing rules to their global configuration.
+- **Installs** 15 language-independent CLI tools.
+- **Detects** Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI, and Windsurf.
+- **Configures** each detected agent with concise tool-routing rules.
 
 Existing configuration is preserved. Managed instructions are updated in
 place when you run the installer again.
@@ -36,7 +52,7 @@ configuration:
 ./install.sh --configure-only
 ```
 
-## What you get
+## What's included
 
 | Task | Tools |
 |---|---|
@@ -46,12 +62,10 @@ configuration:
 | Git and GitHub | [`gh`](https://cli.github.com/), [`worktrunk`](https://worktrunk.dev/), [`difftastic`](https://difftastic.wilfred.me.uk/) |
 | Local checks | [`gitleaks`](https://github.com/gitleaks/gitleaks), [`actionlint`](https://github.com/rhysd/actionlint), [`shellcheck`](https://www.shellcheck.net/), [`hyperfine`](https://github.com/sharkdp/hyperfine) |
 
-Installing tools alone is not enough: agents tend to reuse familiar commands
-such as `grep` and GNU-style `sed`, even when those commands are noisy or
-incompatible with macOS. The bundled [routing rules](agent-routing.md) direct
-each task to the appropriate tool.
+The exact instructions added to supported agents live in
+[`agent-routing.md`](agent-routing.md).
 
-## Go support
+## Optional Go support
 
 Go tooling is optional and has a separate installer:
 
@@ -73,7 +87,7 @@ To configure an existing `gopls` installation without Homebrew:
 The gopls MCP interface is experimental and may run Go commands, download
 modules, or query the vulnerability database when requested.
 
-## Verify
+## Verification
 
 ```bash
 ./verify.sh
@@ -85,7 +99,7 @@ modules, or query the vulnerability database when requested.
 checks installation and repeated updates in an isolated home directory; it
 does not modify your real agent configuration.
 
-## Scope
+## Project scope
 
 - macOS with Homebrew is the only supported platform.
 - The root installer contains only language-independent tools.
