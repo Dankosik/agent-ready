@@ -32,7 +32,7 @@ if command -v claude >/dev/null 2>&1; then
 	configured=$((configured + 1))
 fi
 if command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1; then
-	plutil -extract mcpServers.gopls json -o - "${HOME}/.cursor/mcp.json" >/dev/null
+	jq -e '.mcpServers.gopls != null' "${HOME}/.cursor/mcp.json" >/dev/null
 	configured=$((configured + 1))
 fi
 

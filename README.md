@@ -5,6 +5,7 @@
 <p align="center">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="platform macOS and Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey">
+  <a href="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="15 generic tools" src="https://img.shields.io/badge/generic_tools-15-brightgreen">
 </p>
 
@@ -23,6 +24,17 @@ help coding agents use it correctly.
 
 Requires macOS, Linux, or WSL2; [Homebrew](https://brew.sh/); and at least one
 supported coding agent.
+
+On Linux or WSL2, install Homebrew and add it to Bash first:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+```
+
+See [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux) for distro build
+prerequisites or non-Bash shells.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash
@@ -227,8 +239,8 @@ installer leaves an invalid file unchanged.
 
 ## Project scope
 
-- macOS, Linux, and WSL2 with Homebrew
-- native Windows is not supported
+- macOS and Linux with Homebrew; CI covers macOS and Ubuntu
+- Windows through WSL2; native Windows is not supported
 - language-independent tools in the root installer
 - language integrations under `languages/<name>/`
 - runnable verification for every included tool

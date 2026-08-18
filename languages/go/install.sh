@@ -56,7 +56,11 @@ cursor_config=
 
 if [ "${agent}" = cursor ] || { [ "${agent}" = auto ] && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1; }; }; then
 	cursor_config="${HOME}/.cursor/mcp.json"
-	if [ -f "${cursor_config}" ] && ! plutil -extract mcpServers.gopls json -o - "${cursor_config}" >/dev/null 2>&1 && ! plutil -convert json -o /dev/null "${cursor_config}" >/dev/null 2>&1; then
+	command -v jq >/dev/null 2>&1 || {
+		printf 'Cursor: jq is required to merge mcp.json\n' >&2
+		exit 1
+	}
+	if [ -f "${cursor_config}" ] && ! jq -e -s 'length == 1 and (.[0] | type == "object")' "${cursor_config}" >/dev/null 2>&1; then
 		printf 'Cursor MCP config is not valid JSON: %s\n' "${cursor_config}" >&2
 		exit 1
 	fi
@@ -92,25 +96,22 @@ fi
 
 if [ -n "${cursor_config}" ]; then
 	found=1
-	if [ -f "${cursor_config}" ] && plutil -extract mcpServers.gopls json -o - "${cursor_config}" >/dev/null 2>&1; then
+	if [ -f "${cursor_config}" ] && jq -e '.mcpServers.gopls != null' "${cursor_config}" >/dev/null 2>&1; then
 		printf 'Cursor: kept existing gopls MCP\n'
 	else
 		mkdir -p "$(dirname -- "${cursor_config}")"
 		cursor_tmp=$(mktemp "${cursor_config}.XXXXXX")
 		if [ -f "${cursor_config}" ]; then
-			cp "${cursor_config}" "${cursor_tmp}"
-			if ! plutil -extract mcpServers json -o - "${cursor_tmp}" >/dev/null 2>&1; then
-				if ! plutil -insert mcpServers -json '{}' "${cursor_tmp}"; then
-					rm -f "${cursor_tmp}"
-					exit 1
-				fi
-			fi
+			jq '
+				.mcpServers = (.mcpServers // {})
+				| if (.mcpServers | type) != "object" then error("mcpServers must be an object") else . end
+				| .mcpServers.gopls = {"command":"gopls","args":["mcp"]}
+			' "${cursor_config}" >"${cursor_tmp}" || {
+				rm -f "${cursor_tmp}"
+				exit 1
+			}
 		else
-			printf '{"mcpServers":{}}\n' >"${cursor_tmp}"
-		fi
-		if ! plutil -insert mcpServers.gopls -json '{"command":"gopls","args":["mcp"]}' "${cursor_tmp}"; then
-			rm -f "${cursor_tmp}"
-			exit 1
+			jq -n '{mcpServers:{gopls:{command:"gopls",args:["mcp"]}}}' >"${cursor_tmp}"
 		fi
 		chmod 600 "${cursor_tmp}"
 		mv "${cursor_tmp}" "${cursor_config}"

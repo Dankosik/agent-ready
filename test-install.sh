@@ -9,6 +9,7 @@ trap cleanup EXIT
 
 fake_home="${work}/home"
 fake_bin="${work}/bin"
+test_path="${fake_bin}:${PATH}"
 mkdir -p "${fake_home}" "${fake_bin}"
 
 for command in claude codex cursor-agent gemini copilot windsurf; do
@@ -56,7 +57,7 @@ EOF
 
 run_install() {
 	HOME="${fake_home}" \
-	PATH="${fake_bin}:/opt/homebrew/bin:/usr/bin:/bin" \
+	PATH="${test_path}" \
 	CLAUDE_CONFIG_DIR="${fake_home}/.claude" \
 	CODEX_HOME="${fake_home}/.codex" \
 	COPILOT_HOME="${fake_home}/.copilot" \
@@ -130,7 +131,7 @@ archive="${work}/agent-ready-test.tar.gz"
 mkdir -p "${targeted_home}" "${archive_root}"
 cp "${root}/Brewfile" "${root}/agent-routing.md" "${root}/install.sh" "${archive_root}/"
 tar -czf "${archive}" -C "${work}/archive" agent-ready-test
-HOME="${targeted_home}" PATH="${fake_bin}:/opt/homebrew/bin:/usr/bin:/bin" \
+HOME="${targeted_home}" PATH="${test_path}" \
 	CODEX_HOME="${targeted_home}/.codex" \
 	AGENT_READY_ARCHIVE_URL="file://${archive}" \
 	bash -s -- codex --configure-only <"${root}/bootstrap.sh" >/dev/null
@@ -148,8 +149,10 @@ done
 rg -qF 'init -g --codex --no-trust-filters' "${targeted_home}/rtk-calls"
 
 language_home="${work}/language-home"
-mkdir -p "${language_home}"
-HOME="${language_home}" PATH="${fake_bin}:/opt/homebrew/bin:/usr/bin:/bin" \
+mkdir -p "${language_home}/.cursor"
+printf '{"keep":true,"mcpServers":{"existing":{"command":"existing"}}}\n' \
+	>"${language_home}/.cursor/mcp.json"
+HOME="${language_home}" PATH="${test_path}" \
 	CLAUDE_CONFIG_DIR="${language_home}/.claude" \
 	CODEX_HOME="${language_home}/.codex" \
 	COPILOT_HOME="${language_home}/.copilot" \
@@ -163,11 +166,24 @@ for target in \
 	"${language_home}/.codeium/windsurf/memories/global_rules.md"; do
 	rg -qF 'use gopls where compiler semantics matter' "${target}"
 done
-plutil -extract mcpServers.gopls json -o - "${language_home}/.cursor/mcp.json" >/dev/null
+jq -e '.keep and .mcpServers.existing.command == "existing"
+	and .mcpServers.gopls.command == "gopls" and .mcpServers.gopls.args == ["mcp"]' \
+	"${language_home}/.cursor/mcp.json" >/dev/null
+
+invalid_cursor_home="${work}/invalid-cursor-home"
+mkdir -p "${invalid_cursor_home}/.cursor"
+printf '{broken\n' >"${invalid_cursor_home}/.cursor/mcp.json"
+cp "${invalid_cursor_home}/.cursor/mcp.json" "${work}/invalid-cursor-before"
+if HOME="${invalid_cursor_home}" PATH="${test_path}" \
+	"${root}/languages/go/install.sh" --agent cursor --configure-only >/dev/null 2>&1; then
+	printf 'invalid Cursor MCP config unexpectedly succeeded\n' >&2
+	exit 1
+fi
+cmp -s "${work}/invalid-cursor-before" "${invalid_cursor_home}/.cursor/mcp.json"
 
 targeted_language_home="${work}/targeted-language-home"
 mkdir -p "${targeted_language_home}"
-HOME="${targeted_language_home}" PATH="${fake_bin}:/opt/homebrew/bin:/usr/bin:/bin" \
+HOME="${targeted_language_home}" PATH="${test_path}" \
 	CODEX_HOME="${targeted_language_home}/.codex" \
 	"${root}/bootstrap.sh" language go --agent codex --configure-only >/dev/null
 rg -qF 'use gopls where compiler semantics matter' "${targeted_language_home}/.codex/AGENTS.md"
@@ -189,7 +205,7 @@ keep this
 broken block
 EOF
 cp "${malformed_home}/.claude/CLAUDE.md" "${work}/before"
-if HOME="${malformed_home}" PATH="${malformed_bin}:/opt/homebrew/bin:/usr/bin:/bin" \
+if HOME="${malformed_home}" PATH="${malformed_bin}:${PATH}" \
 	CLAUDE_CONFIG_DIR="${malformed_home}/.claude" \
 	"${root}/install.sh" --configure-only >/dev/null 2>&1; then
 	printf 'malformed markers unexpectedly succeeded\n' >&2

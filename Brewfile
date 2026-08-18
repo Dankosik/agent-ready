@@ -17,13 +17,13 @@
 brew "rtk"
 
 # Python package and script runner.
-# `pip install` into macOS system Python fails outright (externally-managed).
+# `pip install` into many system Python installations fails (externally-managed).
 # The agent's fallbacks are all bad: a leaking venv, --break-system-packages,
 # or giving up. `uv run --with X` is ephemeral and leaves nothing behind.
 brew "uv"
 
 # Find-and-replace with literal and PCRE modes.
-# BSD sed on macOS rejects the GNU `sed -i 's/…/…/' file` form every agent writes.
+# BSD and GNU sed use incompatible `-i` forms; this one is portable.
 brew "sd"
 
 # Repository-aware recursive text search.
