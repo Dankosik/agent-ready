@@ -36,3 +36,22 @@ jobs:
         run: |
           ./test-install.sh
           ./verify.sh
+
+  wsl:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up WSL2
+        shell: pwsh
+        run: |
+          wsl --set-default-version 2
+          wsl --install --distribution Ubuntu-24.04 --no-launch
+          wsl --set-default Ubuntu-24.04
+          wsl --distribution Ubuntu-24.04 --user root -- bash -lc "apt-get update && apt-get install -y --no-install-recommends curl jq ripgrep"
+          wsl --list --verbose
+      - name: Verify behavior in WSL2
+        shell: pwsh
+        run: |
+          $repo = (wsl --distribution Ubuntu-24.04 -- wslpath -a "$env:GITHUB_WORKSPACE").Trim()
+          wsl --distribution Ubuntu-24.04 --user root -- bash -lc "cd '$repo' && bash -n bootstrap.sh install.sh test-install.sh languages/go/install.sh && ./test-install.sh"

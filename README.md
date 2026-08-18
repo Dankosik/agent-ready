@@ -22,8 +22,9 @@ help coding agents use it correctly.
 
 ## Quick start
 
-Requires macOS, Linux, or WSL2; [Homebrew](https://brew.sh/); and at least one
-supported coding agent.
+Requires macOS, Linux, or
+[WSL2](https://learn.microsoft.com/en-us/windows/wsl/install);
+[Homebrew](https://brew.sh/); and at least one supported coding agent.
 
 On Linux or WSL2, install Homebrew and add it to Bash first:
 
@@ -50,6 +51,9 @@ finds them. Start a new agent session after the command finishes.
 
 On Windows, run the installer inside WSL2. It configures agents installed in the
 same WSL environment; native Windows is not supported.
+
+For best performance, keep repositories used by Linux agents in the WSL
+filesystem, such as `~/projects`, rather than under `/mnt/c`.
 
 ## Install for one agent
 
@@ -240,7 +244,8 @@ installer leaves an invalid file unchanged.
 ## Project scope
 
 - macOS and Linux with Homebrew; CI covers macOS and Ubuntu
-- Windows through WSL2; native Windows is not supported
+- Windows through WSL2; CI smoke-tests Ubuntu on WSL2, while native Windows is
+  unsupported
 - language-independent tools in the root installer
 - language integrations under `languages/<name>/`
 - runnable verification for every included tool
