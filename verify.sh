@@ -120,13 +120,16 @@ check_gitleaks() {
 	local repo="${work}/secrets"
 	mkdir -p "${repo}"
 	git -C "${repo}" init -q
-	cat >"${repo}/config_test.go" <<'EOF'
-package config
-
-// fixture: copied real values out of .env so the integration test would pass
-const awsKeyID = "AKIA4X7QZP2NVBWK3TLM"
-const ghToken = "ghp_9fK2mQ7xR4tL8wZ1nB5vC3jH6yD0sA4gT2eU"
-EOF
+	{
+		printf '%s\n' \
+			'package config' \
+			'' \
+			'// fixture: copied real values out of .env so the integration test would pass'
+		printf 'const %s = "%s%s"\n' \
+			'awsKeyID' 'AKIA4X7QZP2NVBW' 'K3TLM'
+		printf 'const %s = "%s%s"\n' \
+			'ghToken' 'ghp_9fK2mQ7xR4tL8wZ1nB5v' 'C3jH6yD0sA4gT2eU'
+	} >"${repo}/config_test.go"
 	git -C "${repo}" add -A
 	git -C "${repo}" -c user.email=v@v -c user.name=v commit -qm "add test fixture"
 	row "without" "the commit succeeds; the keys are in history and stay there"

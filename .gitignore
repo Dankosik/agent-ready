@@ -7,3 +7,6 @@
 *.webp
 *.mov
 *.mp4
+
+# CodeGraph indexes are checkout-specific machine state.
+.codegraph/

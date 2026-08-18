@@ -17,7 +17,9 @@ jobs:
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
       - name: Add Homebrew to PATH
         if: runner.os == 'Linux'
         run: echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
@@ -30,6 +32,8 @@ jobs:
           bash -n bootstrap.sh install.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
           shellcheck bootstrap.sh install.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
           actionlint
+          gitleaks dir --redact .
+          gitleaks git --redact .
           brew bundle check --file Brewfile
           brew bundle check --file languages/go/Brewfile
       - name: Verify behavior
@@ -41,7 +45,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up WSL2
         shell: pwsh
         run: |
