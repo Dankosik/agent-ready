@@ -1,247 +1,171 @@
 <h1 align="center">agent-ready</h1>
 
-<p align="center"><strong>Reliable command-line setup for AI coding agents on macOS.</strong></p>
+<p align="center"><strong>Reliable command-line tools for AI coding agents on macOS and Linux.</strong></p>
 
 <p align="center">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
-  <img alt="platform macOS" src="https://img.shields.io/badge/platform-macOS-lightgrey">
+  <img alt="platform macOS and Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey">
   <img alt="15 generic tools" src="https://img.shields.io/badge/generic_tools-15-brightgreen">
 </p>
 
 <p align="center">
-  <a href="#install-for-your-agent">Install</a> ·
-  <a href="#add-go-support">Go</a> ·
-  <a href="#what-the-installer-changes">What changes</a> ·
-  <a href="#check-the-installation">Check</a> ·
-  <a href="#troubleshooting">Troubleshooting</a>
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#install-for-one-agent">Agents</a> ·
+  <a href="#go-support">Go</a> ·
+  <a href="#whats-installed">Tools</a> ·
+  <a href="#verify">Verify</a>
 </p>
 
-`agent-ready` installs a small set of command-line tools and tells your coding
-agent when to use them. This avoids common macOS problems such as GNU-style
-`sed` commands that do not work, recursive searches through `.git`, regex used
-to inspect parsed code, and large command output filling the agent's context.
+`agent-ready` installs a practical CLI toolkit and adds the instructions that
+help coding agents use it correctly.
 
-Most people need one command. Pick the agent you use and copy its command from
-the next section. If you work with Go, run one additional command afterward.
+## Quick start
 
-> [!IMPORTANT]
-> `agent-ready` does not install Codex, Claude Code, Cursor, or another coding
-> agent. Install and sign in to your agent first. This project installs the
-> supporting CLI tools and configures the agent to use them.
-
-## Before you start
-
-You need:
-
-- macOS
-- [Homebrew](https://brew.sh/) available as the `brew` command
-- at least one supported coding agent
-
-Check Homebrew before running the installer:
-
-```bash
-brew --version
-```
-
-If the command is not found, install Homebrew from [brew.sh](https://brew.sh/),
-then open a new terminal and run `brew --version` again.
-
-## Install for your agent
-
-Choose one command. The installer configures only the agent named at the end.
-
-### Codex
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- codex
-```
-
-### Claude Code
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- claude
-```
-
-### Cursor
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- cursor
-```
-
-### Gemini CLI
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- gemini
-```
-
-### GitHub Copilot CLI
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- copilot
-```
-
-### Windsurf
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- windsurf
-```
-
-### Configure every agent found on the machine
-
-Use this form if you regularly switch between several supported agents:
+Requires macOS, Linux, or WSL2; [Homebrew](https://brew.sh/); and at least one
+supported coding agent.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash
 ```
 
-Without an agent name, the installer keeps the original behavior: it detects
-supported agents and configures each one it finds.
+That's it. The installer adds 15 language-independent tools and configures
+Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI, and Windsurf when it
+finds them. Start a new agent session after the command finishes.
 
-In each command, `curl` downloads `bootstrap.sh` from this repository. Bash
-runs that script and receives the agent name after `--`. The bootstrap then
-downloads the rest of the repository and calls the appropriate installer.
+> [!NOTE]
+> `agent-ready` configures coding agents but does not install them or sign in to
+> their services.
 
-When the command finishes, start a new agent session. You do not need to paste
-the routing rules into prompts. The agent loads them from its normal global
-configuration.
+On Windows, run the installer inside WSL2. It configures agents installed in the
+same WSL environment; native Windows is not supported.
 
-## Add Go support
+## Install for one agent
 
-The base installer contains only language-independent tools. Go support has a
-separate installer because not every user needs `gopls` or its MCP connection.
+Use one of these commands if you want to configure a specific agent instead of
+automatic detection.
 
-Run the base installer first. Then choose one of the commands below.
-
-### Go for Codex
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- language go --agent codex
-```
-
-### Go for Claude Code
+<details>
+<summary><strong>Codex</strong></summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- language go --agent claude
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- codex
 ```
 
-### Go for Cursor
+Routing is added to `~/.codex/AGENTS.md`.
+
+</details>
+
+<details>
+<summary><strong>Claude Code</strong></summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- language go --agent cursor
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- claude
 ```
 
-### Go for every supported agent found on the machine
+Routing is added to `~/.claude/CLAUDE.md`.
+
+</details>
+
+<details>
+<summary><strong>Cursor</strong></summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- cursor
+```
+
+Routing is added through the global hook in `~/.cursor/hooks.json`.
+
+</details>
+
+<details>
+<summary><strong>Gemini CLI</strong></summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- gemini
+```
+
+Routing is added to `~/.gemini/GEMINI.md`.
+
+</details>
+
+<details>
+<summary><strong>GitHub Copilot CLI</strong></summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- copilot
+```
+
+Routing is added to `~/.copilot/copilot-instructions.md`.
+
+</details>
+
+<details>
+<summary><strong>Windsurf</strong></summary>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- windsurf
+```
+
+Routing is added to `~/.codeium/windsurf/memories/global_rules.md`.
+
+</details>
+
+## Go support
+
+Run this after the quick start command if you work with Go:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- language go
 ```
 
-The Go installer adds the official [`gopls`](https://go.dev/gopls/features/mcp)
-language server and registers `gopls mcp` with Codex, Claude Code, or Cursor.
-It also adds one short Go routing rule to the instructions managed by the base
-installer. Existing `gopls` MCP entries are left unchanged.
+It installs `gopls`, connects `gopls mcp` to detected Codex, Claude Code, and
+Cursor installations, and adds the Go routing instructions.
 
-The MCP interface is experimental. When an agent asks it to, `gopls` may run Go
-commands, download modules into the Go cache, or query the vulnerability
-database.
+<details>
+<summary>Configure Go for one agent</summary>
 
-## What the installer changes
+```bash
+# Codex
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- language go --agent codex
 
-The bootstrap downloads the repository archive to a temporary directory, runs
-the selected installer, and removes the download when it exits. The installer
-uses Homebrew to install missing tools from the appropriate `Brewfile`. It then
-configures the selected agent, or every detected agent if none was named.
+# Claude Code
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- language go --agent claude
 
-For agents with file-based global instructions, the base installer writes a
-managed routing block between these markers:
-
-```text
-<!-- agent-ready:start -->
-...
-<!-- agent-ready:end -->
+# Cursor
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- language go --agent cursor
 ```
 
-Anything outside that block stays in place. Re-running the installer replaces
-the existing block instead of adding another copy. A file with no markers is
-fine: the installer appends a new block. If it finds only one marker, duplicate
-markers, or markers in the wrong order, it stops rather than guessing how to
-edit the file.
+</details>
 
-### Agent configuration locations
+## What's installed
 
-| Agent | Main agent-ready location |
+| Job | Tools |
 |---|---|
-| Codex | `~/.codex/AGENTS.md` |
-| Claude Code | `~/.claude/CLAUDE.md` |
-| Cursor | `~/.cursor/hooks.json` and `~/.cursor/hooks/agent-ready-session-start.json` |
-| Gemini CLI | `~/.gemini/GEMINI.md` |
-| GitHub Copilot CLI | `~/.copilot/copilot-instructions.md` |
-| Windsurf | `~/.codeium/windsurf/memories/global_rules.md` |
+| Compact output | [`rtk`](https://github.com/rtk-ai/rtk) |
+| Search and edit | [`ripgrep`](https://github.com/BurntSushi/ripgrep), [`ast-grep`](https://ast-grep.github.io/), [`sd`](https://github.com/chmln/sd) |
+| Python and data | [`uv`](https://docs.astral.sh/uv/), [`jq`](https://jqlang.org/), [`yq`](https://mikefarah.gitbook.io/yq/), [`mdq`](https://github.com/yshavit/mdq) |
+| Git and GitHub | [`gh`](https://cli.github.com/), [`worktrunk`](https://worktrunk.dev/), [`difftastic`](https://difftastic.wilfred.me.uk/) |
+| Local checks | [`gitleaks`](https://github.com/gitleaks/gitleaks), [`actionlint`](https://github.com/rhysd/actionlint), [`shellcheck`](https://www.shellcheck.net/), [`hyperfine`](https://github.com/sharkdp/hyperfine) |
 
-Custom installations can set `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or
-`COPILOT_HOME`. The installer uses those directories instead of the defaults
-shown in the table.
+The generic installer and language installers are separate. Adding Go support
+does not change the base tool list.
 
-The installer also asks `rtk` to set up its native integration for the selected
-agent. Cursor receives routing context through a global `sessionStart` hook.
-Existing Cursor hooks remain in the file.
+## Safe to run again
 
-The Go installer uses the native Codex and Claude MCP commands. For Cursor, it
-merges the `gopls` server into `~/.cursor/mcp.json`. It refuses to edit a Cursor
-MCP file that is not valid JSON.
+The installers preserve existing configuration and update only the block
+between the `agent-ready:start` and `agent-ready:end` markers. Cursor hooks and
+MCP configuration are merged instead of replaced.
 
-## Run it again
-
-The installers are safe to run more than once. A later run installs any missing
-Homebrew formulae and refreshes the managed configuration without duplicating
-it.
-
-If the CLI tools are already installed, skip Homebrew and refresh only the
-configuration:
+Run the same command again whenever you want to refresh the managed
+configuration. Use `--configure-only` to skip Homebrew:
 
 ```bash
-# One agent
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- codex --configure-only
-
-# Go for one agent
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/main/bootstrap.sh | bash -s -- language go --agent codex --configure-only
 ```
 
-Homebrew installs current formula versions. The Brewfiles are not lockfiles,
-and re-running `brew bundle` does not promise that every installed formula will
-be upgraded.
+## Verify
 
-## Inspect before running
-
-If you do not want to pipe a downloaded script into Bash, clone the repository
-and inspect it first:
-
-```bash
-git clone https://github.com/Dankosik/agent-ready.git
-cd agent-ready
-
-less bootstrap.sh
-less install.sh
-less agent-routing.md
-
-./install.sh --agent codex
-```
-
-The equivalent local commands are:
-
-```bash
-./install.sh                         # every detected agent
-./install.sh --agent codex           # only Codex
-./install.sh --configure-only        # detected agents, no Homebrew
-
-./languages/go/install.sh            # Go for detected agents
-./languages/go/install.sh --agent codex
-./languages/go/install.sh --configure-only
-```
-
-## Check the installation
-
-For a quick check, confirm that the main commands are available:
+Quick check:
 
 ```bash
 rtk --version
@@ -249,114 +173,65 @@ rg --version
 ast-grep --version
 ```
 
-The repository also contains runnable comparisons for every generic tool and
-an isolated installer test:
+<details>
+<summary>Run the full local verification</summary>
 
 ```bash
+git clone https://github.com/Dankosik/agent-ready.git
+cd agent-ready
+
 ./verify.sh
 ./test-install.sh
+./languages/go/verify.sh # after installing Go support
 ```
 
-Both scripts use temporary fixtures. They do not edit your real agent
-configuration.
+`verify.sh` and `test-install.sh` use temporary fixtures and do not edit your
+real agent configuration.
 
-After installing Go support, verify `gopls` and its agent connections:
-
-```bash
-./languages/go/verify.sh
-```
-
-The Go verifier reads your current setup and reports how many supported agent
-connections it found.
+</details>
 
 ## Troubleshooting
 
-### `Homebrew is required`
+<details>
+<summary><code>Homebrew is required</code></summary>
 
-Run `brew --version`. If the command is missing, install Homebrew or fix your
-shell `PATH`, then retry the same agent-ready command.
+Install Homebrew from [brew.sh](https://brew.sh/), open a new terminal, and
+check that `brew --version` works. On Linux or WSL2, also follow Homebrew's
+printed `brew shellenv` instructions before retrying.
 
-### `No supported harness found`
+</details>
 
-This message appears only in automatic detection mode. Name the agent
-explicitly, for example:
+<details>
+<summary><code>No supported harness found</code></summary>
 
-```bash
-./install.sh --agent codex --configure-only
-```
+Install your coding agent or choose it explicitly from the agent list above.
 
-### `rtk is not installed`
+</details>
 
-Run the installer without `--configure-only` first. That allows Homebrew to
-install `rtk` before agent configuration begins.
+<details>
+<summary><code>malformed agent-ready markers</code></summary>
 
-### `malformed agent-ready markers`
+Open the file printed in the error. It must contain either no agent-ready
+markers or one start marker followed by one end marker. Fix duplicate or
+unmatched markers and run the installer again.
 
-Open the path printed in the error. It must contain either no agent-ready
-markers or exactly one start marker followed by one end marker. Fix only the
-duplicate or unmatched markers, keep the surrounding instructions, and run the
-installer again.
+</details>
 
-### `Cursor MCP config is not valid JSON`
+<details>
+<summary><code>Cursor MCP config is not valid JSON</code></summary>
 
-Open `~/.cursor/mcp.json` and correct the JSON before retrying the Go installer.
-The installer leaves the invalid file unchanged.
+Fix the JSON in `~/.cursor/mcp.json`, then run the Go installer again. The
+installer leaves an invalid file unchanged.
 
-### `gopls v0.20 or newer is required for MCP`
-
-Upgrade `gopls`, then refresh the Go configuration:
-
-```bash
-brew upgrade gopls
-./languages/go/install.sh --configure-only
-```
-
-### The agent still uses the old instructions
-
-Finish the current agent session and start a new one. Codex, Claude Code, and
-the other supported tools load global instructions when a session starts.
-
-## What's included
-
-| Job | Tools | Why they are here |
-|---|---|---|
-| Compact command output | [`rtk`](https://github.com/rtk-ai/rtk) | Reduces verbose shell output before the agent reads it |
-| Search and replacement | [`ripgrep`](https://github.com/BurntSushi/ripgrep), [`ast-grep`](https://ast-grep.github.io/), [`sd`](https://github.com/chmln/sd) | Handles repository search, syntax-aware search, and macOS-safe replacement |
-| Python and structured data | [`uv`](https://docs.astral.sh/uv/), [`jq`](https://jqlang.org/), [`yq`](https://mikefarah.gitbook.io/yq/), [`mdq`](https://github.com/yshavit/mdq) | Runs temporary Python dependencies and reads structured files without regex |
-| Git and GitHub | [`gh`](https://cli.github.com/), [`worktrunk`](https://worktrunk.dev/), [`difftastic`](https://difftastic.wilfred.me.uk/) | Reads typed GitHub data, shows worktree state, and produces syntax-aware diffs |
-| Local checks | [`gitleaks`](https://github.com/gitleaks/gitleaks), [`actionlint`](https://github.com/rhysd/actionlint), [`shellcheck`](https://www.shellcheck.net/), [`hyperfine`](https://github.com/sharkdp/hyperfine) | Finds secrets and workflow or shell errors, and measures command performance |
-
-The exact generic instructions live in [`agent-routing.md`](agent-routing.md).
-Go-specific instructions live in
-[`languages/go/agent-routing.md`](languages/go/agent-routing.md).
-
-## Remove the managed configuration
-
-There is no automated uninstaller yet. The installed CLI tools are ordinary
-Homebrew formulae and may be useful outside this project, so removing them
-automatically would be unsafe.
-
-To remove only the routing instructions, delete the block between the
-`agent-ready:start` and `agent-ready:end` markers from the agent configuration
-file listed above. For Cursor, also remove the `sessionStart` entry whose
-command is `cat ./hooks/agent-ready-session-start.json`, then remove
-`~/.cursor/hooks/agent-ready-session-start.json`.
-
-This removes the routing owned by agent-ready. It does not remove RTK's native
-agent integration.
-
-Review your agent's MCP configuration separately before removing `gopls`. Do
-not delete another MCP entry with the same name unless you know agent-ready
-created it.
+</details>
 
 ## Project scope
 
-- macOS with Homebrew is the only supported platform.
-- The root installer contains only language-independent tools.
-- Language integrations live under `languages/<name>/` and keep their own
-  installer, Brewfile, routing instructions, and verification.
-- A new tool must prevent a reproducible failure or provide a measurable
-  improvement with a local verification case.
+- macOS, Linux, and WSL2 with Homebrew
+- native Windows is not supported
+- language-independent tools in the root installer
+- language integrations under `languages/<name>/`
+- runnable verification for every included tool
 
 ## License
 
