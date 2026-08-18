@@ -57,6 +57,7 @@ EOF
 
 run_install() {
 	HOME="${fake_home}" \
+	XDG_CONFIG_HOME="${fake_home}/.config" \
 	PATH="${test_path}" \
 	CLAUDE_CONFIG_DIR="${fake_home}/.claude" \
 	CODEX_HOME="${fake_home}/.codex" \
@@ -132,6 +133,7 @@ mkdir -p "${targeted_home}" "${archive_root}"
 cp "${root}/Brewfile" "${root}/agent-routing.md" "${root}/install.sh" "${archive_root}/"
 tar -czf "${archive}" -C "${work}/archive" agent-ready-test
 HOME="${targeted_home}" PATH="${test_path}" \
+	XDG_CONFIG_HOME="${targeted_home}/.config" \
 	CODEX_HOME="${targeted_home}/.codex" \
 	AGENT_READY_ARCHIVE_URL="file://${archive}" \
 	bash -s -- codex --configure-only <"${root}/bootstrap.sh" >/dev/null
@@ -153,6 +155,7 @@ mkdir -p "${language_home}/.cursor"
 printf '{"keep":true,"mcpServers":{"existing":{"command":"existing"}}}\n' \
 	>"${language_home}/.cursor/mcp.json"
 HOME="${language_home}" PATH="${test_path}" \
+	XDG_CONFIG_HOME="${language_home}/.config" \
 	CLAUDE_CONFIG_DIR="${language_home}/.claude" \
 	CODEX_HOME="${language_home}/.codex" \
 	COPILOT_HOME="${language_home}/.copilot" \
@@ -175,6 +178,7 @@ mkdir -p "${invalid_cursor_home}/.cursor"
 printf '{broken\n' >"${invalid_cursor_home}/.cursor/mcp.json"
 cp "${invalid_cursor_home}/.cursor/mcp.json" "${work}/invalid-cursor-before"
 if HOME="${invalid_cursor_home}" PATH="${test_path}" \
+	XDG_CONFIG_HOME="${invalid_cursor_home}/.config" \
 	"${root}/languages/go/install.sh" --agent cursor --configure-only >/dev/null 2>&1; then
 	printf 'invalid Cursor MCP config unexpectedly succeeded\n' >&2
 	exit 1
@@ -184,6 +188,7 @@ cmp -s "${work}/invalid-cursor-before" "${invalid_cursor_home}/.cursor/mcp.json"
 targeted_language_home="${work}/targeted-language-home"
 mkdir -p "${targeted_language_home}"
 HOME="${targeted_language_home}" PATH="${test_path}" \
+	XDG_CONFIG_HOME="${targeted_language_home}/.config" \
 	CODEX_HOME="${targeted_language_home}/.codex" \
 	"${root}/bootstrap.sh" language go --agent codex --configure-only >/dev/null
 rg -qF 'use gopls where compiler semantics matter' "${targeted_language_home}/.codex/AGENTS.md"
@@ -206,6 +211,7 @@ broken block
 EOF
 cp "${malformed_home}/.claude/CLAUDE.md" "${work}/before"
 if HOME="${malformed_home}" PATH="${malformed_bin}:${PATH}" \
+	XDG_CONFIG_HOME="${malformed_home}/.config" \
 	CLAUDE_CONFIG_DIR="${malformed_home}/.claude" \
 	"${root}/install.sh" --configure-only >/dev/null 2>&1; then
 	printf 'malformed markers unexpectedly succeeded\n' >&2
