@@ -6,8 +6,9 @@ root=$(cd -- "$(dirname -- "$0")" && pwd)
 
 agent=auto
 install_tools=1
+upgrade_tools=0
 usage() {
-	printf 'usage: %s [--agent auto|claude|codex|cursor] [--configure-only]\n' "$0" >&2
+	printf 'usage: %s [--agent auto|claude|codex|cursor] [--configure-only|--upgrade]\n' "$0" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -21,9 +22,15 @@ while [ "$#" -gt 0 ]; do
 		install_tools=0
 		shift
 		;;
+	--upgrade)
+		upgrade_tools=1
+		shift
+		;;
 	*) usage; exit 2 ;;
 	esac
 done
+
+[ "${install_tools}" -eq 1 ] || [ "${upgrade_tools}" -eq 0 ] || { usage; exit 2; }
 
 case "${agent}" in
 claude-code) agent=claude ;;
@@ -39,7 +46,11 @@ if [ "${install_tools}" -eq 1 ]; then
 		printf 'Homebrew is required: https://brew.sh\n' >&2
 		exit 1
 	}
-	brew bundle --file "${root}/Brewfile"
+	if [ "${upgrade_tools}" -eq 1 ]; then
+		brew bundle --file "${root}/Brewfile"
+	else
+		brew bundle --no-upgrade --file "${root}/Brewfile"
+	fi
 fi
 
 command -v gopls >/dev/null 2>&1 || {

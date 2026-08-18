@@ -26,6 +26,11 @@ cat >"${fake_bin}/gopls" <<'EOF'
 exit 0
 EOF
 chmod +x "${fake_bin}/gopls"
+cat >"${fake_bin}/brew" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"${HOME}/brew-calls"
+EOF
+chmod +x "${fake_bin}/brew"
 
 mkdir -p \
 	"${fake_home}/.claude" \
@@ -63,6 +68,14 @@ run_install() {
 	CODEX_HOME="${fake_home}/.codex" \
 	COPILOT_HOME="${fake_home}/.copilot" \
 		"${root}/install.sh" --configure-only >/dev/null
+}
+
+run_tool_install() {
+	HOME="${fake_home}" \
+	XDG_CONFIG_HOME="${fake_home}/.config" \
+	PATH="${test_path}" \
+	CODEX_HOME="${fake_home}/.codex" \
+		"${root}/bootstrap.sh" --agent codex "$@" >/dev/null
 }
 
 run_install
@@ -126,6 +139,15 @@ for expected in \
 	rg -qF "${expected}" "${fake_home}/rtk-calls"
 done
 
+run_tool_install
+run_tool_install --upgrade
+rg -qF "bundle --no-upgrade --file ${root}/Brewfile" "${fake_home}/brew-calls"
+rg -qF "bundle --file ${root}/Brewfile" "${fake_home}/brew-calls"
+if run_tool_install --configure-only --upgrade >/dev/null 2>&1; then
+	printf 'conflicting install options unexpectedly succeeded\n' >&2
+	exit 1
+fi
+
 targeted_home="${work}/targeted-home"
 archive_root="${work}/archive/agent-ready-test"
 archive="${work}/agent-ready-test.tar.gz"
@@ -172,6 +194,15 @@ done
 jq -e '.keep and .mcpServers.existing.command == "existing"
 	and .mcpServers.gopls.command == "gopls" and .mcpServers.gopls.args == ["mcp"]' \
 	"${language_home}/.cursor/mcp.json" >/dev/null
+
+HOME="${language_home}" PATH="${test_path}" \
+	XDG_CONFIG_HOME="${language_home}/.config" \
+	"${root}/languages/go/install.sh" --agent cursor >/dev/null
+HOME="${language_home}" PATH="${test_path}" \
+	XDG_CONFIG_HOME="${language_home}/.config" \
+	"${root}/languages/go/install.sh" --agent cursor --upgrade >/dev/null
+rg -qF "bundle --no-upgrade --file ${root}/languages/go/Brewfile" "${language_home}/brew-calls"
+rg -qF "bundle --file ${root}/languages/go/Brewfile" "${language_home}/brew-calls"
 
 invalid_cursor_home="${work}/invalid-cursor-home"
 mkdir -p "${invalid_cursor_home}/.cursor"
