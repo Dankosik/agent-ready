@@ -53,5 +53,5 @@ jobs:
       - name: Verify behavior in WSL2
         shell: pwsh
         run: |
-          $repo = (wsl --distribution Ubuntu-24.04 -- wslpath -a "$env:GITHUB_WORKSPACE").Trim()
+          $repo = "/mnt/$($env:GITHUB_WORKSPACE.Substring(0, 1).ToLower())/$($env:GITHUB_WORKSPACE.Substring(3).Replace('\', '/'))"
           wsl --distribution Ubuntu-24.04 --user root -- bash -lc "cd '$repo' && bash -n bootstrap.sh install.sh test-install.sh languages/go/install.sh && ./test-install.sh"
