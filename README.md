@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <img alt="agent-ready — Better tools. Better agents." src="assets/agent-ready-hero.jpg">
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#install-for-one-agent">Agents</a> ·
   <a href="#go-support">Go</a> ·

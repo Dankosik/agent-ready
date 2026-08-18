@@ -8,5 +8,8 @@
 *.mov
 *.mp4
 
+# Curated repository artwork.
+!assets/agent-ready-hero.jpg
+
 # CodeGraph indexes are checkout-specific machine state.
 .codegraph/
