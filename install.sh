@@ -4,20 +4,48 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "$0")" && pwd)
 
-case "${1:-}" in
-	"")
-		command -v brew >/dev/null 2>&1 || {
-			printf 'Homebrew is required: https://brew.sh\n' >&2
-			exit 1
-		}
-		brew bundle --file "${root}/Brewfile"
+agent=auto
+install_tools=1
+usage() {
+	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf] [--configure-only]\n' "$0" >&2
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--agent)
+		[ "$#" -ge 2 ] || { usage; exit 2; }
+		agent="$2"
+		shift 2
 		;;
-	--configure-only) ;;
+	--configure-only)
+		install_tools=0
+		shift
+		;;
 	*)
-		printf 'usage: %s [--configure-only]\n' "$0" >&2
+		usage
 		exit 2
 		;;
+	esac
+done
+
+case "${agent}" in
+claude-code) agent=claude ;;
+cursor-agent) agent=cursor ;;
+gemini-cli) agent=gemini ;;
+github-copilot) agent=copilot ;;
 esac
+case "${agent}" in
+auto | claude | codex | cursor | gemini | copilot | windsurf) ;;
+*) usage; exit 2 ;;
+esac
+
+if [ "${install_tools}" -eq 1 ]; then
+	command -v brew >/dev/null 2>&1 || {
+		printf 'Homebrew is required: https://brew.sh\n' >&2
+		exit 1
+	}
+	brew bundle --file "${root}/Brewfile"
+fi
 
 # Installing a tool is not the same as the agent using it. Measured on real
 # session transcripts, an agent reaches for the command it already knows —
@@ -210,32 +238,32 @@ install_cursor_hook() {
 }
 
 found=0
-if command -v claude >/dev/null 2>&1; then
+if [ "${agent}" = claude ] || { [ "${agent}" = auto ] && command -v claude >/dev/null 2>&1; }; then
 	found=1
 	configure_rtk "Claude Code" -g --hook-only --auto-patch --no-trust-filters
 	install_block "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" "Claude Code"
 fi
-if command -v codex >/dev/null 2>&1; then
+if [ "${agent}" = codex ] || { [ "${agent}" = auto ] && command -v codex >/dev/null 2>&1; }; then
 	found=1
 	configure_rtk "Codex" -g --codex --no-trust-filters
 	install_block "${CODEX_HOME:-${HOME}/.codex}/AGENTS.md" "Codex"
 fi
-if command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 || [ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]; then
+if [ "${agent}" = cursor ] || { [ "${agent}" = auto ] && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 || [ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]; }; }; then
 	found=1
 	configure_rtk "Cursor" -g --agent cursor --hook-only --auto-patch --no-trust-filters
 	install_cursor_hook
 fi
-if command -v gemini >/dev/null 2>&1; then
+if [ "${agent}" = gemini ] || { [ "${agent}" = auto ] && command -v gemini >/dev/null 2>&1; }; then
 	found=1
 	configure_rtk "Gemini CLI" -g --gemini --hook-only --auto-patch --no-trust-filters
 	install_block "${HOME}/.gemini/GEMINI.md" "Gemini CLI"
 fi
-if command -v copilot >/dev/null 2>&1; then
+if [ "${agent}" = copilot ] || { [ "${agent}" = auto ] && command -v copilot >/dev/null 2>&1; }; then
 	found=1
 	configure_rtk "GitHub Copilot CLI" -g --copilot --hook-only --auto-patch --no-trust-filters
 	install_block "${COPILOT_HOME:-${HOME}/.copilot}/copilot-instructions.md" "GitHub Copilot CLI"
 fi
-if command -v windsurf >/dev/null 2>&1 || [ -d /Applications/Windsurf.app ] || [ -d "${HOME}/Applications/Windsurf.app" ]; then
+if [ "${agent}" = windsurf ] || { [ "${agent}" = auto ] && { command -v windsurf >/dev/null 2>&1 || [ -d /Applications/Windsurf.app ] || [ -d "${HOME}/Applications/Windsurf.app" ]; }; }; then
 	found=1
 	install_block "${HOME}/.codeium/windsurf/memories/global_rules.md" "Windsurf"
 fi

@@ -4,20 +4,43 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "$0")" && pwd)
 
-case "${1:-}" in
-	"")
-		command -v brew >/dev/null 2>&1 || {
-			printf 'Homebrew is required: https://brew.sh\n' >&2
-			exit 1
-		}
-		brew bundle --file "${root}/Brewfile"
+agent=auto
+install_tools=1
+usage() {
+	printf 'usage: %s [--agent auto|claude|codex|cursor] [--configure-only]\n' "$0" >&2
+}
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--agent)
+		[ "$#" -ge 2 ] || { usage; exit 2; }
+		agent="$2"
+		shift 2
 		;;
-	--configure-only) ;;
-	*)
-		printf 'usage: %s [--configure-only]\n' "$0" >&2
-		exit 2
+	--configure-only)
+		install_tools=0
+		shift
 		;;
+	*) usage; exit 2 ;;
+	esac
+done
+
+case "${agent}" in
+claude-code) agent=claude ;;
+cursor-agent) agent=cursor ;;
 esac
+case "${agent}" in
+auto | claude | codex | cursor) ;;
+*) usage; exit 2 ;;
+esac
+
+if [ "${install_tools}" -eq 1 ]; then
+	command -v brew >/dev/null 2>&1 || {
+		printf 'Homebrew is required: https://brew.sh\n' >&2
+		exit 1
+	}
+	brew bundle --file "${root}/Brewfile"
+fi
 
 command -v gopls >/dev/null 2>&1 || {
 	printf 'gopls is not installed; run %s first\n' "$0" >&2
@@ -31,7 +54,7 @@ gopls mcp -instructions >/dev/null 2>&1 || {
 found=0
 cursor_config=
 
-if command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1; then
+if [ "${agent}" = cursor ] || { [ "${agent}" = auto ] && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1; }; }; then
 	cursor_config="${HOME}/.cursor/mcp.json"
 	if [ -f "${cursor_config}" ] && ! plutil -extract mcpServers.gopls json -o - "${cursor_config}" >/dev/null 2>&1 && ! plutil -convert json -o /dev/null "${cursor_config}" >/dev/null 2>&1; then
 		printf 'Cursor MCP config is not valid JSON: %s\n' "${cursor_config}" >&2
@@ -39,7 +62,11 @@ if command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1;
 	fi
 fi
 
-if command -v codex >/dev/null 2>&1; then
+if [ "${agent}" = codex ] && ! command -v codex >/dev/null 2>&1; then
+	printf 'codex is required for --agent codex\n' >&2
+	exit 1
+fi
+if [ "${agent}" = codex ] || { [ "${agent}" = auto ] && command -v codex >/dev/null 2>&1; }; then
 	found=1
 	if codex mcp get gopls --json >/dev/null 2>&1; then
 		printf 'Codex: kept existing gopls MCP\n'
@@ -49,7 +76,11 @@ if command -v codex >/dev/null 2>&1; then
 	fi
 fi
 
-if command -v claude >/dev/null 2>&1; then
+if [ "${agent}" = claude ] && ! command -v claude >/dev/null 2>&1; then
+	printf 'claude is required for --agent claude\n' >&2
+	exit 1
+fi
+if [ "${agent}" = claude ] || { [ "${agent}" = auto ] && command -v claude >/dev/null 2>&1; }; then
 	found=1
 	if claude mcp get gopls >/dev/null 2>&1; then
 		printf 'Claude Code: kept existing gopls MCP\n'
@@ -91,7 +122,11 @@ agent_ready_config="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready"
 mkdir -p "${agent_ready_config}/languages"
 printf 'enabled\n' >"${agent_ready_config}/languages/go"
 if command -v rtk >/dev/null 2>&1; then
-	"${root}/../../install.sh" --configure-only
+	if [ "${agent}" = auto ]; then
+		"${root}/../../install.sh" --configure-only
+	else
+		"${root}/../../install.sh" --agent "${agent}" --configure-only
+	fi
 else
 	printf 'Go routing will be applied after the base agent-ready installer runs\n'
 fi

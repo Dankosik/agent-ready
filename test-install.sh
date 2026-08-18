@@ -20,6 +20,11 @@ cat >"${fake_bin}/rtk" <<'EOF'
 printf '%s\n' "$*" >>"${HOME}/rtk-calls"
 EOF
 chmod +x "${fake_bin}/rtk"
+cat >"${fake_bin}/gopls" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "${fake_bin}/gopls"
 
 mkdir -p \
 	"${fake_home}/.claude" \
@@ -118,6 +123,61 @@ for expected in \
 	'init -g --copilot --hook-only --auto-patch --no-trust-filters'; do
 	rg -qF "${expected}" "${fake_home}/rtk-calls"
 done
+
+targeted_home="${work}/targeted-home"
+archive_root="${work}/archive/agent-ready-test"
+archive="${work}/agent-ready-test.tar.gz"
+mkdir -p "${targeted_home}" "${archive_root}"
+cp "${root}/Brewfile" "${root}/agent-routing.md" "${root}/install.sh" "${archive_root}/"
+tar -czf "${archive}" -C "${work}/archive" agent-ready-test
+HOME="${targeted_home}" PATH="${fake_bin}:/opt/homebrew/bin:/usr/bin:/bin" \
+	CODEX_HOME="${targeted_home}/.codex" \
+	AGENT_READY_ARCHIVE_URL="file://${archive}" \
+	bash -s -- codex --configure-only <"${root}/bootstrap.sh" >/dev/null
+rg -q '^Tool routing:$' "${targeted_home}/.codex/AGENTS.md"
+[ "$(rg -c '^<!-- agent-ready:start -->$' "${targeted_home}/.codex/AGENTS.md")" -eq 1 ]
+for untouched in \
+	"${targeted_home}/.claude/CLAUDE.md" \
+	"${targeted_home}/.cursor/hooks.json" \
+	"${targeted_home}/.gemini/GEMINI.md" \
+	"${targeted_home}/.copilot/copilot-instructions.md" \
+	"${targeted_home}/.codeium/windsurf/memories/global_rules.md"; do
+	[ ! -e "${untouched}" ]
+done
+[ "$(wc -l <"${targeted_home}/rtk-calls" | tr -d ' ')" -eq 1 ]
+rg -qF 'init -g --codex --no-trust-filters' "${targeted_home}/rtk-calls"
+
+language_home="${work}/language-home"
+mkdir -p "${language_home}"
+HOME="${language_home}" PATH="${fake_bin}:/opt/homebrew/bin:/usr/bin:/bin" \
+	CLAUDE_CONFIG_DIR="${language_home}/.claude" \
+	CODEX_HOME="${language_home}/.codex" \
+	COPILOT_HOME="${language_home}/.copilot" \
+	"${root}/bootstrap.sh" language go --configure-only >/dev/null
+[ -f "${language_home}/.config/agent-ready/languages/go" ]
+for target in \
+	"${language_home}/.claude/CLAUDE.md" \
+	"${language_home}/.codex/AGENTS.md" \
+	"${language_home}/.gemini/GEMINI.md" \
+	"${language_home}/.copilot/copilot-instructions.md" \
+	"${language_home}/.codeium/windsurf/memories/global_rules.md"; do
+	rg -qF 'use gopls where compiler semantics matter' "${target}"
+done
+plutil -extract mcpServers.gopls json -o - "${language_home}/.cursor/mcp.json" >/dev/null
+
+targeted_language_home="${work}/targeted-language-home"
+mkdir -p "${targeted_language_home}"
+HOME="${targeted_language_home}" PATH="${fake_bin}:/opt/homebrew/bin:/usr/bin:/bin" \
+	CODEX_HOME="${targeted_language_home}/.codex" \
+	"${root}/bootstrap.sh" language go --agent codex --configure-only >/dev/null
+rg -qF 'use gopls where compiler semantics matter' "${targeted_language_home}/.codex/AGENTS.md"
+[ ! -e "${targeted_language_home}/.claude/CLAUDE.md" ]
+[ ! -e "${targeted_language_home}/.cursor/hooks.json" ]
+
+if "${root}/bootstrap.sh" language unknown --configure-only >/dev/null 2>&1; then
+	printf 'unknown language unexpectedly succeeded\n' >&2
+	exit 1
+fi
 
 malformed_home="${work}/malformed-home"
 malformed_bin="${work}/malformed-bin"
