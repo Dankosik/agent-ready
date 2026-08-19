@@ -261,7 +261,8 @@ if [ "${agent}" = codex ] || { [ "${agent}" = auto ] && command -v codex >/dev/n
 fi
 if [ "${agent}" = cursor ] || { [ "${agent}" = auto ] && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 || [ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]; }; }; then
 	found=1
-	configure_rtk "Cursor" -g --agent cursor --hook-only --auto-patch --no-trust-filters
+	configure_rtk "Cursor" -g --agent cursor --hook-only --no-patch --no-trust-filters >/dev/null
+	printf 'Cursor: configured RTK integration\n'
 	install_cursor_hook
 fi
 if [ "${agent}" = gemini ] || { [ "${agent}" = auto ] && command -v gemini >/dev/null 2>&1; }; then

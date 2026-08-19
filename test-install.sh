@@ -133,7 +133,7 @@ jq -e '.additional_context | contains("use gopls where compiler semantics matter
 for expected in \
 	'init -g --hook-only --auto-patch --no-trust-filters' \
 	'init -g --codex --no-trust-filters' \
-	'init -g --agent cursor --hook-only --auto-patch --no-trust-filters' \
+	'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
 	'init -g --gemini --hook-only --auto-patch --no-trust-filters' \
 	'init -g --copilot --hook-only --auto-patch --no-trust-filters'; do
 	rg -qF "${expected}" "${fake_home}/rtk-calls"
@@ -171,6 +171,17 @@ for untouched in \
 done
 [ "$(wc -l <"${targeted_home}/rtk-calls" | tr -d ' ')" -eq 1 ]
 rg -qF 'init -g --codex --no-trust-filters' "${targeted_home}/rtk-calls"
+
+targeted_cursor_home="${work}/targeted-cursor-home"
+mkdir -p "${targeted_cursor_home}/.cursor"
+HOME="${targeted_cursor_home}" PATH="${test_path}" \
+XDG_CONFIG_HOME="${targeted_cursor_home}/.config" \
+	"${root}/bootstrap.sh" cursor --configure-only >/dev/null
+rg -qF 'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
+	"${targeted_cursor_home}/rtk-calls"
+[ ! -e "${targeted_cursor_home}/.claude" ]
+jq -e '([.hooks.sessionStart[] | select(.command == "cat ./hooks/agent-ready-session-start.json")] | length) == 1' \
+	"${targeted_cursor_home}/.cursor/hooks.json" >/dev/null
 
 language_home="${work}/language-home"
 mkdir -p "${language_home}/.cursor"
