@@ -173,7 +173,7 @@ done
 rg -qF 'init -g --codex --no-trust-filters' "${targeted_home}/rtk-calls"
 
 targeted_cursor_home="${work}/targeted-cursor-home"
-mkdir -p "${targeted_cursor_home}/.cursor"
+mkdir -p "${targeted_cursor_home}"
 HOME="${targeted_cursor_home}" PATH="${test_path}" \
 XDG_CONFIG_HOME="${targeted_cursor_home}/.config" \
 	"${root}/bootstrap.sh" cursor --configure-only >/dev/null
