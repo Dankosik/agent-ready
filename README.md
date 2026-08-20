@@ -133,6 +133,24 @@ Routing is added to `~/.codeium/windsurf/memories/global_rules.md`.
 
 </details>
 
+### Additional agents in the current checkout
+
+Run `./bootstrap.sh opencode --configure-only` from a checkout, replacing
+`opencode` with the selector you need:
+
+| Agent | Selector | Global instructions |
+|---|---|---|
+| Grok Build | `grok` | `~/.grok/rules/agent-ready.md` |
+| OpenCode | `opencode` | `~/.config/opencode/AGENTS.md` |
+| Qwen Code | `qwen` | `~/.qwen/QWEN.md` |
+| Cline CLI | `cline` | `~/.cline/data/settings/rules/agent-ready.md` |
+| Kilo Code | `kilo` | `~/.config/kilo/AGENTS.md` |
+| Crush | `crush` | `~/.config/crush/CRUSH.md` |
+| goose | `goose` | `~/.config/goose/AGENTS.md` |
+
+OpenCode plugins use OpenCode's instructions. Kilo Code is configured
+separately because its OpenCode-based CLI uses its own config directory.
+
 ## Go support
 
 Run this after the quick start command if you work with Go:

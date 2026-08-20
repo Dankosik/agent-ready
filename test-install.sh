@@ -12,7 +12,7 @@ fake_bin="${work}/bin"
 test_path="${fake_bin}:${PATH}"
 mkdir -p "${fake_home}" "${fake_bin}"
 
-for command in claude codex cursor-agent gemini copilot windsurf; do
+for command in claude codex cursor-agent gemini copilot windsurf grok opencode qwen cline kilo crush goose; do
 	printf '#!/bin/sh\nexit 0\n' >"${fake_bin}/${command}"
 	chmod +x "${fake_bin}/${command}"
 done
@@ -38,12 +38,26 @@ mkdir -p \
 	"${fake_home}/.gemini" \
 	"${fake_home}/.copilot" \
 	"${fake_home}/.cursor" \
+	"${fake_home}/grok-home/rules" \
+	"${fake_home}/qwen-home" \
+	"${fake_home}/cline-data/settings/rules" \
+	"${fake_home}/.config/opencode" \
+	"${fake_home}/.config/kilo" \
+	"${fake_home}/.config/crush" \
+	"${fake_home}/.config/goose" \
 	"${fake_home}/dotfiles"
 printf 'user claude\n' >"${fake_home}/dotfiles/CLAUDE.md"
 ln -s ../dotfiles/CLAUDE.md "${fake_home}/.claude/CLAUDE.md"
 printf 'user codex\n' >"${fake_home}/.codex/AGENTS.md"
 printf 'user gemini\n' >"${fake_home}/.gemini/GEMINI.md"
 printf 'user copilot\n' >"${fake_home}/.copilot/copilot-instructions.md"
+printf 'user grok\n' >"${fake_home}/grok-home/rules/agent-ready.md"
+printf 'user opencode\n' >"${fake_home}/.config/opencode/AGENTS.md"
+printf 'user qwen\n' >"${fake_home}/qwen-home/QWEN.md"
+printf 'user cline\n' >"${fake_home}/cline-data/settings/rules/agent-ready.md"
+printf 'user kilo\n' >"${fake_home}/.config/kilo/AGENTS.md"
+printf 'user crush\n' >"${fake_home}/.config/crush/CRUSH.md"
+printf 'user goose\n' >"${fake_home}/.config/goose/AGENTS.md"
 cat >"${fake_home}/.cursor/AGENTS.md" <<EOF
 user cursor
 <!-- agent-ready:start -->
@@ -67,6 +81,9 @@ run_install() {
 	CLAUDE_CONFIG_DIR="${fake_home}/.claude" \
 	CODEX_HOME="${fake_home}/.codex" \
 	COPILOT_HOME="${fake_home}/.copilot" \
+	GROK_HOME="${fake_home}/grok-home" \
+	QWEN_HOME="${fake_home}/qwen-home" \
+	CLINE_DATA_DIR="${fake_home}/cline-data" \
 		"${root}/install.sh" --configure-only >/dev/null
 }
 
@@ -86,7 +103,14 @@ for target in \
 	"${fake_home}/.codex/AGENTS.md" \
 	"${fake_home}/.gemini/GEMINI.md" \
 	"${fake_home}/.copilot/copilot-instructions.md" \
-	"${fake_home}/.codeium/windsurf/memories/global_rules.md"; do
+	"${fake_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${fake_home}/grok-home/rules/agent-ready.md" \
+	"${fake_home}/.config/opencode/AGENTS.md" \
+	"${fake_home}/qwen-home/QWEN.md" \
+	"${fake_home}/cline-data/settings/rules/agent-ready.md" \
+	"${fake_home}/.config/kilo/AGENTS.md" \
+	"${fake_home}/.config/crush/CRUSH.md" \
+	"${fake_home}/.config/goose/AGENTS.md"; do
 	[ "$(rg -c '^<!-- agent-ready:start -->$' "${target}")" -eq 1 ]
 	[ "$(rg -c '^<!-- agent-ready:end -->$' "${target}")" -eq 1 ]
 	rg -q '^Tool routing:$' "${target}"
@@ -101,6 +125,13 @@ rg -q '^user claude$' "${fake_home}/.claude/CLAUDE.md"
 rg -q '^user codex$' "${fake_home}/.codex/AGENTS.md"
 rg -q '^user gemini$' "${fake_home}/.gemini/GEMINI.md"
 rg -q '^user copilot$' "${fake_home}/.copilot/copilot-instructions.md"
+rg -q '^user grok$' "${fake_home}/grok-home/rules/agent-ready.md"
+rg -q '^user opencode$' "${fake_home}/.config/opencode/AGENTS.md"
+rg -q '^user qwen$' "${fake_home}/qwen-home/QWEN.md"
+rg -q '^user cline$' "${fake_home}/cline-data/settings/rules/agent-ready.md"
+rg -q '^user kilo$' "${fake_home}/.config/kilo/AGENTS.md"
+rg -q '^user crush$' "${fake_home}/.config/crush/CRUSH.md"
+rg -q '^user goose$' "${fake_home}/.config/goose/AGENTS.md"
 rg -q '^user cursor$' "${fake_home}/.cursor/AGENTS.md"
 if rg -q 'agent-ready:' "${fake_home}/.cursor/AGENTS.md"; then
 	printf 'legacy Cursor routing block was not removed\n' >&2
@@ -123,7 +154,14 @@ for target in \
 	"${fake_home}/.codex/AGENTS.md" \
 	"${fake_home}/.gemini/GEMINI.md" \
 	"${fake_home}/.copilot/copilot-instructions.md" \
-	"${fake_home}/.codeium/windsurf/memories/global_rules.md"; do
+	"${fake_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${fake_home}/grok-home/rules/agent-ready.md" \
+	"${fake_home}/.config/opencode/AGENTS.md" \
+	"${fake_home}/qwen-home/QWEN.md" \
+	"${fake_home}/cline-data/settings/rules/agent-ready.md" \
+	"${fake_home}/.config/kilo/AGENTS.md" \
+	"${fake_home}/.config/crush/CRUSH.md" \
+	"${fake_home}/.config/goose/AGENTS.md"; do
 	[ "$(rg -c '^- Go:' "${target}")" -eq 1 ]
 	rg -qF 'use gopls where compiler semantics matter' "${target}"
 done
@@ -135,7 +173,8 @@ for expected in \
 	'init -g --codex --no-trust-filters' \
 	'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
 	'init -g --gemini --hook-only --auto-patch --no-trust-filters' \
-	'init -g --copilot --hook-only --auto-patch --no-trust-filters'; do
+	'init -g --copilot --hook-only --auto-patch --no-trust-filters' \
+	'init -g --opencode --no-trust-filters'; do
 	rg -qF "${expected}" "${fake_home}/rtk-calls"
 done
 
@@ -166,7 +205,14 @@ for untouched in \
 	"${targeted_home}/.cursor/hooks.json" \
 	"${targeted_home}/.gemini/GEMINI.md" \
 	"${targeted_home}/.copilot/copilot-instructions.md" \
-	"${targeted_home}/.codeium/windsurf/memories/global_rules.md"; do
+	"${targeted_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${targeted_home}/.grok/rules/agent-ready.md" \
+	"${targeted_home}/.config/opencode/AGENTS.md" \
+	"${targeted_home}/.qwen/QWEN.md" \
+	"${targeted_home}/.cline/data/settings/rules/agent-ready.md" \
+	"${targeted_home}/.config/kilo/AGENTS.md" \
+	"${targeted_home}/.config/crush/CRUSH.md" \
+	"${targeted_home}/.config/goose/AGENTS.md"; do
 	[ ! -e "${untouched}" ]
 done
 [ "$(wc -l <"${targeted_home}/rtk-calls" | tr -d ' ')" -eq 1 ]
@@ -182,6 +228,15 @@ rg -qF 'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
 [ ! -e "${targeted_cursor_home}/.claude" ]
 jq -e '([.hooks.sessionStart[] | select(.command == "cat ./hooks/agent-ready-session-start.json")] | length) == 1' \
 	"${targeted_cursor_home}/.cursor/hooks.json" >/dev/null
+
+targeted_opencode_home="${work}/targeted-opencode-home"
+mkdir -p "${targeted_opencode_home}"
+HOME="${targeted_opencode_home}" PATH="${test_path}" \
+XDG_CONFIG_HOME="${targeted_opencode_home}/.config" \
+	"${root}/bootstrap.sh" open-code --configure-only >/dev/null
+rg -qF 'init -g --opencode --no-trust-filters' "${targeted_opencode_home}/rtk-calls"
+rg -q '^Tool routing:$' "${targeted_opencode_home}/.config/opencode/AGENTS.md"
+[ ! -e "${targeted_opencode_home}/.codex" ]
 
 language_home="${work}/language-home"
 mkdir -p "${language_home}/.cursor"
@@ -199,7 +254,14 @@ for target in \
 	"${language_home}/.codex/AGENTS.md" \
 	"${language_home}/.gemini/GEMINI.md" \
 	"${language_home}/.copilot/copilot-instructions.md" \
-	"${language_home}/.codeium/windsurf/memories/global_rules.md"; do
+	"${language_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${language_home}/.grok/rules/agent-ready.md" \
+	"${language_home}/.config/opencode/AGENTS.md" \
+	"${language_home}/.qwen/QWEN.md" \
+	"${language_home}/.cline/data/settings/rules/agent-ready.md" \
+	"${language_home}/.config/kilo/AGENTS.md" \
+	"${language_home}/.config/crush/CRUSH.md" \
+	"${language_home}/.config/goose/AGENTS.md"; do
 	rg -qF 'use gopls where compiler semantics matter' "${target}"
 done
 jq -e '.keep and .mcpServers.existing.command == "existing"
