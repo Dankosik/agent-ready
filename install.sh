@@ -8,7 +8,7 @@ agent=auto
 install_tools=1
 upgrade_tools=0
 usage() {
-	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf] [--configure-only|--upgrade]\n' "$0" >&2
+	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose] [--configure-only|--upgrade]\n' "$0" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -40,9 +40,13 @@ claude-code) agent=claude ;;
 cursor-agent) agent=cursor ;;
 gemini-cli) agent=gemini ;;
 github-copilot) agent=copilot ;;
+grok-build) agent=grok ;;
+open-code) agent=opencode ;;
+qwen-code) agent=qwen ;;
+kilocode | kilo-code) agent=kilo ;;
 esac
 case "${agent}" in
-auto | claude | codex | cursor | gemini | copilot | windsurf) ;;
+auto | claude | codex | cursor | gemini | copilot | windsurf | grok | opencode | qwen | cline | kilo | crush | goose) ;;
 *) usage; exit 2 ;;
 esac
 
@@ -279,6 +283,35 @@ fi
 if [ "${agent}" = windsurf ] || { [ "${agent}" = auto ] && { command -v windsurf >/dev/null 2>&1 || [ -d /Applications/Windsurf.app ] || [ -d "${HOME}/Applications/Windsurf.app" ]; }; }; then
 	found=1
 	install_block "${HOME}/.codeium/windsurf/memories/global_rules.md" "Windsurf"
+fi
+if [ "${agent}" = grok ] || { [ "${agent}" = auto ] && command -v grok >/dev/null 2>&1; }; then
+	found=1
+	install_block "${GROK_HOME:-${HOME}/.grok}/rules/agent-ready.md" "Grok Build"
+fi
+if [ "${agent}" = opencode ] || { [ "${agent}" = auto ] && command -v opencode >/dev/null 2>&1; }; then
+	found=1
+	configure_rtk "OpenCode" -g --opencode --no-trust-filters
+	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" "OpenCode"
+fi
+if [ "${agent}" = qwen ] || { [ "${agent}" = auto ] && command -v qwen >/dev/null 2>&1; }; then
+	found=1
+	install_block "${QWEN_HOME:-${HOME}/.qwen}/QWEN.md" "Qwen Code"
+fi
+if [ "${agent}" = cline ] || { [ "${agent}" = auto ] && command -v cline >/dev/null 2>&1; }; then
+	found=1
+	install_block "${CLINE_DATA_DIR:-${HOME}/.cline/data}/settings/rules/agent-ready.md" "Cline CLI"
+fi
+if [ "${agent}" = kilo ] || { [ "${agent}" = auto ] && command -v kilo >/dev/null 2>&1; }; then
+	found=1
+	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/kilo/AGENTS.md" "Kilo Code"
+fi
+if [ "${agent}" = crush ] || { [ "${agent}" = auto ] && command -v crush >/dev/null 2>&1; }; then
+	found=1
+	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/crush/CRUSH.md" "Crush"
+fi
+if [ "${agent}" = goose ] || { [ "${agent}" = auto ] && command -v goose >/dev/null 2>&1; }; then
+	found=1
+	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/goose/AGENTS.md" "goose"
 fi
 
 [ "${found}" -eq 1 ] || printf 'No supported harness found; rerun %s --configure-only after installing one\n' "$0"

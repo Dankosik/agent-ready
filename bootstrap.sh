@@ -57,7 +57,7 @@ language)
 --agent | --configure-only | --upgrade)
 	bash "${root}/install.sh" "$@"
 	;;
-claude | claude-code | codex | cursor | cursor-agent | gemini | gemini-cli | copilot | github-copilot | windsurf)
+claude | claude-code | codex | cursor | cursor-agent | gemini | gemini-cli | copilot | github-copilot | windsurf | grok | grok-build | opencode | open-code | qwen | qwen-code | cline | kilo | kilocode | kilo-code | crush | goose)
 	agent="$1"
 	shift
 	bash "${root}/install.sh" --agent "${agent}" "$@"
