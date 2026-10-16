@@ -274,14 +274,14 @@ EOF
 # ----------------------------------------------------------------- gh
 check_gh() {
 	have gh || return 0
-	start gh "is CI green on main, and for which commit?"
+	start gh "did the last finished CI run on main pass, and for which commit?"
 	local html matches api
 	if ! html=$(curl -sfL https://github.com/Dankosik/agent-ready/actions 2>/dev/null); then
 		row "skipped" "no network"
 		skip=$((skip + 1))
 		return 0
 	fi
-	if ! api=$(gh run list -R Dankosik/agent-ready -w CI -b main -L 1 \
+	if ! api=$(gh run list -R Dankosik/agent-ready -w CI -b main -s completed -L 1 \
 		--json conclusion,headSha --jq '.[0] | "\(.conclusion) at \(.headSha[0:7])"' 2>/dev/null); then
 		row "skipped" "gh is not authenticated"
 		skip=$((skip + 1))
@@ -289,7 +289,7 @@ check_gh() {
 	fi
 	matches=$(printf '%s' "${html}" | grep -o 'completed successfully\|failed' | sort | uniq -c | awk '{c=$1; $1=""; printf "%s×%s ", c, substr($0, 2)}')
 	row "without" "$(printf '%s' "${html}" | bytes) bytes of HTML, grep → ${matches:-nothing}"
-	row "with" "gh run list -w CI -b main --json → ${api}"
+	row "with" "gh run list -w CI -b main -s completed --json → ${api}"
 	claim "gh returned a conclusion tied to a commit" grep -Eq '^[a-z_]+ at [0-9a-f]{7}$' <<<"${api}"
 	row "verdict" "the page mixes every workflow and branch; the API answers the question asked"
 	finish
