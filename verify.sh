@@ -321,7 +321,7 @@ check_worktrunk() {
 	merged=$(git -C "${repo}" branch --merged main | tr -d '*+ ' | grep -v '^main$' | paste -sd' ' -)
 	json=$(wt -C "${repo}" list --format=json --config-set list.json-schema=2)
 	row "without" "git branch --merged main → ${merged:-none}"
-	row "with" "wt list → $(jq -r '[.items[] | select(.branch != "main") | "\(.branch)=\(.display.state)\(if .worktree.changes.modified then "+dirty" else "" end)"] | join(" ")' <<<"${json}")"
+	row "with" "wt list → $(jq -r '[.items[] | select(.branch != "main") | "\(.branch)=\(.display.state // "no-commits")\(if .worktree.changes.modified then "+dirty" else "" end)"] | join(" ")' <<<"${json}")"
 	claim "git calls wip merged" grep -qw wip <<<"${merged}"
 	claim "git misses the squash-merged branch" lacks squashed "${merged}"
 	claim "wt sees the squash merge" jq -e '.items[] | select(.branch == "squashed") | .display.state == "integrated"' <<<"${json}"
@@ -598,9 +598,14 @@ check_hyperfine() {
 	hyperfine -N --warmup 5 --runs 30 --export-json "${work}/aa.json" \
 		-n A "rg -c func ${tree}" -n B "rg -c func ${tree}" >/dev/null 2>&1
 	# B/A with its propagated uncertainty, the way hyperfine prints "x ± y times faster".
+	# Computed from the raw timings: hyperfine 1.x exports .times, 2.x .measurements.
 	local verdict
-	verdict=$(jq -r '.results as [$a, $b] | ($b.mean / $a.mean) as $r
-		| ($r * ((($a.stddev / $a.mean) | . * .) + (($b.stddev / $b.mean) | . * .) | sqrt)) as $e
+	verdict=$(jq -r '
+		def times: if .times then .times else [.measurements[].time_wall_clock.value] end;
+		def stats: times as $t | ($t | add / length) as $m
+			| {mean: $m, sd: (($t | map((. - $m) * (. - $m)) | add / (length - 1)) | sqrt)};
+		[.results[] | stats] as [$a, $b] | ($b.mean / $a.mean) as $r
+		| ($r * ((($a.sd / $a.mean) | . * .) + (($b.sd / $b.mean) | . * .) | sqrt)) as $e
 		| "\($r * 100 | round / 100) ± \($e * 100 | round / 100) \(if (($r - 1) | fabs) <= 2 * $e then "→ no measurable difference" else "→ different" end)"' "${work}/aa.json")
 	row "with" "hyperfine, 30 runs each → B/A = ${verdict}"
 	claim "hyperfine did not find a difference between identical commands" grep -q 'no measurable difference' <<<"${verdict}"
