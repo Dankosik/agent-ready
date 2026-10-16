@@ -54,7 +54,7 @@ language)
 	[ -f "${installer}" ] || { printf 'unsupported language: %s\n' "${language}" >&2; exit 2; }
 	bash "${installer}" "$@"
 	;;
---agent | --configure-only | --upgrade)
+--agent | --configure-only | --upgrade | --binaries)
 	bash "${root}/install.sh" "$@"
 	;;
 claude | claude-code | codex | cursor | cursor-agent | gemini | gemini-cli | copilot | github-copilot | windsurf | grok | grok-build | opencode | open-code | qwen | qwen-code | cline | kilo | kilocode | kilo-code | crush | goose)

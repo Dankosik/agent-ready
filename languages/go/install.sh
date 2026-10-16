@@ -7,8 +7,9 @@ root=$(cd -- "$(dirname -- "$0")" && pwd)
 agent=auto
 install_tools=1
 upgrade_tools=0
+binaries=0
 usage() {
-	printf 'usage: %s [--agent auto|claude|codex|cursor] [--configure-only|--upgrade]\n' "$0" >&2
+	printf 'usage: %s [--agent auto|claude|codex|cursor] [--configure-only|--upgrade] [--binaries]\n' "$0" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -26,11 +27,15 @@ while [ "$#" -gt 0 ]; do
 		upgrade_tools=1
 		shift
 		;;
+	--binaries)
+		binaries=1
+		shift
+		;;
 	*) usage; exit 2 ;;
 	esac
 done
 
-[ "${install_tools}" -eq 1 ] || [ "${upgrade_tools}" -eq 0 ] || { usage; exit 2; }
+[ "${install_tools}" -eq 1 ] || { [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
 
 case "${agent}" in
 claude-code) agent=claude ;;
@@ -41,7 +46,27 @@ auto | claude | codex | cursor) ;;
 *) usage; exit 2 ;;
 esac
 
-if [ "${install_tools}" -eq 1 ]; then
+# gopls publishes no release binaries; without Homebrew on Linux it is built
+# with the Go toolchain the user already has, into the same directory as the
+# generic tools.
+os="${AGENT_READY_OS:-$(uname -s)}"
+if [ "${install_tools}" -eq 1 ] && [ "${os}" = Linux ] &&
+	{ [ "${binaries}" -eq 1 ] || ! command -v brew >/dev/null 2>&1; }; then
+	command -v go >/dev/null 2>&1 || {
+		printf 'Go is required to install gopls: https://go.dev/dl/\n' >&2
+		exit 1
+	}
+	bin_dir="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}"
+	mkdir -p "${bin_dir}"
+	if [ "${upgrade_tools}" -eq 1 ] || [ ! -x "${bin_dir}/gopls" ]; then
+		GOBIN="${bin_dir}" go install golang.org/x/tools/gopls@latest
+	fi
+	PATH="${bin_dir}:${PATH}"
+elif [ "${install_tools}" -eq 1 ]; then
+	[ "${binaries}" -eq 0 ] || {
+		printf -- '--binaries is supported on Linux only; use Homebrew on %s\n' "${os}" >&2
+		exit 2
+	}
 	command -v brew >/dev/null 2>&1 || {
 		printf 'Homebrew is required: https://brew.sh\n' >&2
 		exit 1
