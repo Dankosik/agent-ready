@@ -7,8 +7,9 @@ root=$(cd -- "$(dirname -- "$0")" && pwd)
 agent=auto
 install_tools=1
 upgrade_tools=0
+binaries=0
 usage() {
-	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose] [--configure-only|--upgrade]\n' "$0" >&2
+	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose] [--configure-only|--upgrade] [--binaries]\n' "$0" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -26,6 +27,10 @@ while [ "$#" -gt 0 ]; do
 		upgrade_tools=1
 		shift
 		;;
+	--binaries)
+		binaries=1
+		shift
+		;;
 	*)
 		usage
 		exit 2
@@ -33,7 +38,7 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 
-[ "${install_tools}" -eq 1 ] || [ "${upgrade_tools}" -eq 0 ] || { usage; exit 2; }
+[ "${install_tools}" -eq 1 ] || { [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
 
 case "${agent}" in
 claude-code) agent=claude ;;
@@ -50,7 +55,22 @@ auto | claude | codex | cursor | gemini | copilot | windsurf | grok | opencode |
 *) usage; exit 2 ;;
 esac
 
-if [ "${install_tools}" -eq 1 ]; then
+# On Linux the tools come from upstream release binaries unless Homebrew is
+# already there; --binaries chooses them even then. macOS always uses Homebrew.
+os="${AGENT_READY_OS:-$(uname -s)}"
+if [ "${install_tools}" -eq 1 ] && [ "${os}" = Linux ] &&
+	{ [ "${binaries}" -eq 1 ] || ! command -v brew >/dev/null 2>&1; }; then
+	if [ "${upgrade_tools}" -eq 1 ]; then
+		bash "${root}/install-binaries.sh" --upgrade
+	else
+		bash "${root}/install-binaries.sh"
+	fi
+	PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
+elif [ "${install_tools}" -eq 1 ]; then
+	[ "${binaries}" -eq 0 ] || {
+		printf -- '--binaries is supported on Linux only; use Homebrew on %s\n' "${os}" >&2
+		exit 2
+	}
 	command -v brew >/dev/null 2>&1 || {
 		printf 'Homebrew is required: https://brew.sh\n' >&2
 		exit 1

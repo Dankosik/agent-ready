@@ -3,6 +3,11 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+  # The tools are installed at their latest versions, so a daily run catches an
+  # upstream release that breaks a claim before users do.
+  schedule:
+    - cron: "17 5 * * *"
 
 permissions:
   contents: read
@@ -29,8 +34,8 @@ jobs:
           brew bundle --file languages/go/Brewfile
       - name: Check scripts and Brewfiles
         run: |
-          bash -n bootstrap.sh install.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
-          shellcheck bootstrap.sh install.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
+          bash -n bootstrap.sh install.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
+          shellcheck bootstrap.sh install.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
           actionlint
           gitleaks dir --redact .
           gitleaks git --redact .
@@ -40,6 +45,41 @@ jobs:
         run: |
           ./test-install.sh
           ./verify.sh
+
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install tools from release binaries
+        run: |
+          ./install.sh --binaries
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Verify behavior
+        run: ./verify.sh
+
+  container-root:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Install base packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git python3 unzip xz-utils
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install tools as root without Homebrew
+        run: |
+          ./install.sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Verify behavior
+        run: ./verify.sh
 
   wsl:
     runs-on: windows-2025
@@ -52,10 +92,10 @@ jobs:
           wsl --set-default-version 2
           wsl --install --distribution Ubuntu-24.04 --no-launch
           wsl --set-default Ubuntu-24.04
-          wsl --distribution Ubuntu-24.04 --user root -- bash -lc "apt-get update && apt-get install -y --no-install-recommends curl jq ripgrep"
+          wsl --distribution Ubuntu-24.04 --user root -- bash -lc "apt-get update && apt-get install -y --no-install-recommends curl jq ripgrep python3 unzip xz-utils"
           wsl --list --verbose
       - name: Verify behavior in WSL2
         shell: pwsh
         run: |
           $repo = "/mnt/$($env:GITHUB_WORKSPACE.Substring(0, 1).ToLower())/$($env:GITHUB_WORKSPACE.Substring(3).Replace('\', '/'))"
-          wsl --distribution Ubuntu-24.04 --user root -- bash -lc "cd '$repo' && bash -n bootstrap.sh install.sh test-install.sh languages/go/install.sh && ./test-install.sh"
+          wsl --distribution Ubuntu-24.04 --user root -- bash -lc "cd '$repo' && bash -n bootstrap.sh install.sh install-binaries.sh test-install.sh languages/go/install.sh && ./test-install.sh"

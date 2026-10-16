@@ -14,6 +14,9 @@ for people who run its installers against real machines and real agent configs.
 - Homebrew installs must not upgrade existing formulae by default. Upgrades stay
   explicit through `--upgrade`; configuration-only work stays behind
   `--configure-only`.
+- Release-binary installs (`install-binaries.sh`) must verify the GitHub SHA-256
+  digest before unpacking, write only to the binary directory and the
+  agent-ready state file, and send `GITHUB_TOKEN` only to `api.github.com`.
 
 ## Protect user machines
 
@@ -51,8 +54,8 @@ for people who run its installers against real machines and real agent configs.
 Run the checks that apply to the exact candidate. The full acceptance ladder is:
 
 ```bash
-rtk bash -n bootstrap.sh install.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
-rtk shellcheck bootstrap.sh install.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
+rtk bash -n bootstrap.sh install.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
+rtk shellcheck bootstrap.sh install.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
 rtk actionlint
 rtk gitleaks dir --redact .
 rtk gitleaks git --redact .

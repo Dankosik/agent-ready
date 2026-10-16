@@ -323,4 +323,188 @@ if HOME="${malformed_home}" PATH="${malformed_bin}:${PATH}" \
 fi
 cmp -s "${work}/before" "${malformed_home}/.claude/CLAUDE.md"
 
+# Linux without Homebrew: release binaries from a file:// stand-in for the
+# GitHub API, with every archive format the real releases use.
+gh_api="${work}/github"
+gh_assets="${work}/github-assets"
+mkdir -p "${gh_api}" "${gh_assets}"
+real_jq=$(command -v jq)
+digest_of() {
+	if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+fake_binary() {
+	if [ "$2" = jq ]; then
+		printf '#!/bin/sh\nexec %s "$@"\n' "${real_jq}" >"$1"
+	else
+		# shellcheck disable=SC2016 # $* and $HOME belong to the generated script
+		printf '#!/bin/sh\nprintf "%%s %%s\\n" %s "$*" >>"${HOME}/binary-calls"\n' "$2" >"$1"
+	fi
+	chmod +x "$1"
+}
+# publish <repo> <tag> <binaries> <asset>... — one release with the given assets.
+publish() {
+	local repo="$1" tag="$2" bins="$3" asset dir stage bin
+	shift 3
+	dir="${gh_assets}/${repo}/${tag}"
+	mkdir -p "${dir}" "${gh_api}/repos/${repo}/releases"
+	for asset in "$@"; do
+		stage="${work}/stage/${asset}"
+		rm -rf "${stage}"
+		mkdir -p "${stage}/pkg"
+		for bin in ${bins//,/ }; do fake_binary "${stage}/pkg/${bin}" "${bin}"; done
+		case "${asset}" in
+		*.tar.gz) tar -czf "${dir}/${asset}" -C "${stage}" pkg ;;
+		*.tar.xz) tar -cJf "${dir}/${asset}" -C "${stage}" pkg ;;
+		*.zip) (cd "${stage}/pkg" && python3 -m zipfile -c "${dir}/${asset}" ./*) ;;
+		*) cp "${stage}/pkg/${bins}" "${dir}/${asset}" ;;
+		esac
+	done
+	if [ "${repo}" = jqlang/jq ]; then
+		(cd "${dir}" && for asset in "$@"; do printf '%s  %s\n' "$(digest_of "${asset}")" "${asset}"; done) >"${dir}/sha256sum.txt"
+		set -- "$@" sha256sum.txt
+	fi
+	for asset in "$@"; do
+		jq -n --arg name "${asset}" --arg digest "sha256:$(digest_of "${dir}/${asset}")" \
+			--arg url "file://${dir}/${asset}" '{name: $name, digest: $digest, browser_download_url: $url}'
+	done | jq -s --arg tag "${tag}" '{tag_name: $tag, assets: .}' >"${gh_api}/repos/${repo}/releases/latest"
+}
+publish_all() {
+	local v="$1"
+	publish jqlang/jq "jq-${v}" jq jq-linux-amd64 jq-linux-arm64 jq-linux-armhf
+	publish rtk-ai/rtk "v${v}" rtk rtk-x86_64-unknown-linux-musl.tar.gz rtk-aarch64-unknown-linux-gnu.tar.gz \
+		rtk-oss-x86_64-unknown-linux-musl.tar.gz
+	publish astral-sh/uv "${v}" uv,uvx uv-x86_64-unknown-linux-musl.tar.gz uv-aarch64-unknown-linux-musl.tar.gz \
+		uv-x86_64-unknown-linux-gnu.tar.gz
+	publish chmln/sd "v${v}" sd "sd-v${v}-x86_64-unknown-linux-musl.tar.gz" "sd-v${v}-aarch64-unknown-linux-musl.tar.gz"
+	publish BurntSushi/ripgrep "${v}" rg "ripgrep-${v}-x86_64-unknown-linux-musl.tar.gz" \
+		"ripgrep-${v}-aarch64-unknown-linux-musl.tar.gz" "ripgrep-${v}-aarch64-unknown-linux-gnu.tar.gz"
+	publish ast-grep/ast-grep "${v}" ast-grep,sg app-x86_64-unknown-linux-gnu.zip app-aarch64-unknown-linux-gnu.zip
+	publish cli/cli "v${v}" gh "gh_${v}_linux_amd64.tar.gz" "gh_${v}_linux_arm64.tar.gz"
+	publish max-sixty/worktrunk "v${v}" wt,git-wt worktrunk-x86_64-unknown-linux-musl.tar.xz \
+		worktrunk-aarch64-unknown-linux-musl.tar.xz
+	publish gitleaks/gitleaks "v${v}" gitleaks "gitleaks_${v}_linux_x64.tar.gz" "gitleaks_${v}_linux_arm64.tar.gz"
+	publish rhysd/actionlint "v${v}" actionlint "actionlint_${v}_linux_amd64.tar.gz" "actionlint_${v}_linux_arm64.tar.gz"
+	publish koalaman/shellcheck "v${v}" shellcheck "shellcheck-v${v}.linux.x86_64.tar.gz" "shellcheck-v${v}.linux.aarch64.tar.gz"
+	publish Wilfred/difftastic "${v}" difft "difft-${v}-x86_64-unknown-linux-musl.tar.gz" \
+		"difft-${v}-aarch64-unknown-linux-gnu.tar.gz"
+	publish mikefarah/yq "v${v}" yq yq_linux_amd64 yq_linux_arm64
+	publish yshavit/mdq "v${v}" mdq mdq-linux-x64-musl.tar.gz mdq-linux-x64.tar.gz
+	publish sharkdp/hyperfine "v${v}" hyperfine "hyperfine-v${v}-x86_64-unknown-linux-musl.tar.gz" \
+		"hyperfine-v${v}-aarch64-unknown-linux-musl.tar.gz"
+}
+publish_all 1.0.0
+
+# A PATH with the base system tools but no jq, so the jq bootstrap runs too.
+base_bin="${work}/base-bin"
+mkdir -p "${base_bin}"
+for command in bash sh env curl tar gzip xz unzip python3 sha256sum shasum awk sed grep find \
+	mktemp cp chmod mv rm mkdir cut head uname cat dirname basename tr sort readlink cmp wc; do
+	path=$(command -v "${command}" || true)
+	[ -z "${path}" ] || ln -s "${path}" "${base_bin}/${command}"
+done
+for command in claude codex; do cp "${fake_bin}/${command}" "${base_bin}/"; done
+
+binary_home="${work}/binary-home"
+mkdir -p "${binary_home}"
+run_binaries() {
+	HOME="${binary_home}" PATH="${base_bin}" \
+		XDG_CONFIG_HOME="${binary_home}/.config" \
+		CODEX_HOME="${binary_home}/.codex" \
+		AGENT_READY_OS=Linux AGENT_READY_ARCH="${arch:-x86_64}" \
+		AGENT_READY_GITHUB_API="file://${gh_api}" \
+		"${root}/install.sh" --agent codex "$@"
+}
+bins="${binary_home}/.local/bin"
+state="${binary_home}/.config/agent-ready/binaries"
+expected_bins="jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine"
+
+run_binaries >"${work}/binaries.out"
+for bin in ${expected_bins}; do
+	[ -x "${bins}/${bin}" ] || { printf 'binary install did not provide %s\n' "${bin}" >&2; exit 1; }
+done
+[ ! -e "${bins}/sg" ] || { printf 'ast-grep installed sg, which shadows shadow-utils sg\n' >&2; exit 1; }
+[ "$(wc -l <"${state}" | tr -d ' ')" -eq 15 ]
+rg -qx 'ripgrep 1.0.0' "${state}"
+rg -qF 'jq jq-1.0.0 installed' "${work}/binaries.out"
+rg -qF 'init -g --codex --no-trust-filters' "${binary_home}/binary-calls"
+rg -q '^Tool routing:$' "${binary_home}/.codex/AGENTS.md"
+rg -qF 'is not on PATH' "${work}/binaries.out"
+
+# A rerun needs no network at all.
+mv "${gh_api}" "${gh_api}.offline"
+run_binaries >"${work}/binaries.out"
+mv "${gh_api}.offline" "${gh_api}"
+[ "$(rg -c 'already installed$' "${work}/binaries.out")" -eq 15 ]
+
+# --upgrade downloads only what changed upstream.
+publish BurntSushi/ripgrep 2.0.0 rg ripgrep-2.0.0-x86_64-unknown-linux-musl.tar.gz
+run_binaries --upgrade >"${work}/binaries.out"
+rg -qF 'ripgrep 2.0.0 installed' "${work}/binaries.out"
+[ "$(rg -c 'is up to date$' "${work}/binaries.out")" -eq 14 ]
+rg -qx 'ripgrep 2.0.0' "${state}"
+
+# A digest mismatch installs nothing and fails.
+jq '.assets[0].digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
+	"${gh_api}/repos/chmln/sd/releases/latest" >"${work}/sd.json"
+cp "${work}/sd.json" "${gh_api}/repos/chmln/sd/releases/latest"
+rm "${bins}/sd"
+if run_binaries >"${work}/binaries.out" 2>&1; then
+	printf 'checksum mismatch unexpectedly succeeded\n' >&2
+	exit 1
+fi
+rg -qF 'sd: checksum mismatch' "${work}/binaries.out"
+[ ! -e "${bins}/sd" ]
+publish_all 1.0.0
+
+# aarch64: mdq publishes no build; it is reported and skipped, nothing else is.
+rm -rf "${binary_home}"
+mkdir -p "${binary_home}"
+arch=aarch64 run_binaries >"${work}/binaries.out" 2>&1
+rg -qF 'mdq: no Linux aarch64 build is published upstream; skipped' "${work}/binaries.out"
+[ ! -e "${bins}/mdq" ]
+[ -x "${bins}/hyperfine" ]
+
+# Homebrew stays the default where it exists; --binaries overrides it on Linux only.
+brew_home="${work}/brew-linux-home"
+mkdir -p "${brew_home}"
+HOME="${brew_home}" PATH="${fake_bin}:${base_bin}" XDG_CONFIG_HOME="${brew_home}/.config" \
+	CODEX_HOME="${brew_home}/.codex" AGENT_READY_OS=Linux \
+	AGENT_READY_GITHUB_API="file://${gh_api}" \
+	"${root}/install.sh" --agent codex >/dev/null
+rg -qF "bundle --no-upgrade --file ${root}/Brewfile" "${brew_home}/brew-calls"
+[ ! -e "${brew_home}/.local/bin" ]
+HOME="${brew_home}" PATH="${fake_bin}:${base_bin}" XDG_CONFIG_HOME="${brew_home}/.config" \
+	CODEX_HOME="${brew_home}/.codex" AGENT_READY_OS=Linux AGENT_READY_ARCH=x86_64 \
+	AGENT_READY_GITHUB_API="file://${gh_api}" \
+	"${root}/install.sh" --agent codex --binaries >/dev/null
+[ -x "${brew_home}/.local/bin/rg" ]
+[ "$(wc -l <"${brew_home}/brew-calls" | tr -d ' ')" -eq 1 ]
+if HOME="${brew_home}" PATH="${test_path}" AGENT_READY_OS=Darwin \
+	"${root}/install.sh" --agent codex --binaries >/dev/null 2>&1; then
+	printf -- '--binaries unexpectedly succeeded on macOS\n' >&2
+	exit 1
+fi
+if HOME="${brew_home}" PATH="${test_path}" "${root}/install.sh" --configure-only --binaries >/dev/null 2>&1; then
+	printf -- '--configure-only --binaries unexpectedly succeeded\n' >&2
+	exit 1
+fi
+
+# Go on Linux without Homebrew builds gopls with the user's toolchain.
+go_home="${work}/go-linux-home"
+go_bin="${work}/go-bin"
+mkdir -p "${go_home}" "${go_bin}"
+cat >"${go_bin}/go" <<'EOF'
+#!/bin/sh
+printf 'GOBIN=%s %s\n' "${GOBIN}" "$*" >>"${HOME}/go-calls"
+mkdir -p "${GOBIN}" && cp "$(command -v gopls-fixture)" "${GOBIN}/gopls"
+EOF
+cp "${fake_bin}/gopls" "${go_bin}/gopls-fixture"
+cp "${fake_bin}/codex" "${go_bin}/"
+chmod +x "${go_bin}/go"
+HOME="${go_home}" PATH="${go_bin}:${base_bin}" XDG_CONFIG_HOME="${go_home}/.config" \
+	CODEX_HOME="${go_home}/.codex" AGENT_READY_OS=Linux \
+	"${root}/languages/go/install.sh" --agent codex >/dev/null
+rg -qxF "GOBIN=${go_home}/.local/bin install golang.org/x/tools/gopls@latest" "${go_home}/go-calls"
+[ -x "${go_home}/.local/bin/gopls" ]
+
 printf 'installer routing checks passed\n'

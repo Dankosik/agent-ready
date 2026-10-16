@@ -26,20 +26,18 @@ help coding agents use it correctly.
 
 ## Quick start
 
-Requires macOS, Linux, or
-[WSL2](https://learn.microsoft.com/en-us/windows/wsl/install);
-[Homebrew](https://brew.sh/); and at least one supported coding agent.
+Requires at least one supported coding agent, and:
 
-On Linux or WSL2, install Homebrew and add it to Bash first:
+- macOS: [Homebrew](https://brew.sh/)
+- Linux or [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install):
+  `curl`, `xz`, and `unzip`. No Homebrew and no root needed; see
+  [Linux without Homebrew](#linux-without-homebrew).
+
+On Debian or Ubuntu:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+sudo apt-get install -y curl ca-certificates xz-utils unzip
 ```
-
-See [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux) for distro build
-prerequisites or non-Bash shells.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.0.2/bootstrap.sh | AGENT_READY_REF=v1.0.2 bash
@@ -61,6 +59,26 @@ same WSL environment; native Windows is not supported.
 
 For best performance, keep repositories used by Linux agents in the WSL
 filesystem, such as `~/projects`, rather than under `/mnt/c`.
+
+### Linux without Homebrew
+
+On Linux, the tools come from each project's latest GitHub release, not from a
+package manager:
+
+- every download is checked against the SHA-256 digest GitHub records for that
+  release asset before it is unpacked; a mismatch installs nothing;
+- binaries go to `~/.local/bin` (override with `AGENT_READY_BIN_DIR`), so no
+  `sudo` is needed, and it also works as root in a container;
+- static builds are used where upstream publishes them; `mdq` publishes no
+  arm64 Linux build and is skipped there.
+
+If Homebrew is already installed, it is used as before. Pass `--binaries` to use
+release binaries anyway. Add `~/.local/bin` to `PATH` if the installer says it
+is missing. Go support builds `gopls` with your Go toolchain
+(`go install golang.org/x/tools/gopls@latest`) into the same directory.
+
+The installer makes one GitHub API request per tool it installs. If you hit the
+anonymous rate limit, set `GITHUB_TOKEN` and run it again.
 
 ## Install for one agent
 
@@ -198,8 +216,9 @@ between the `agent-ready:start` and `agent-ready:end` markers. Cursor hooks and
 MCP configuration are merged instead of replaced.
 
 Run the same command again whenever you want to refresh the managed
-configuration. Existing Homebrew formulae are not upgraded unless you pass
-`--upgrade`. Use `--configure-only` to skip Homebrew entirely:
+configuration. Installed tools are not upgraded unless you pass `--upgrade`;
+with release binaries, `--upgrade` downloads only the tools that have a newer
+release. Use `--configure-only` to skip tool installation entirely:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.0.2/bootstrap.sh | AGENT_READY_REF=v1.0.2 bash -s -- codex --configure-only
@@ -243,9 +262,35 @@ real agent configuration.
 <details>
 <summary><code>Homebrew is required</code></summary>
 
-Install Homebrew from [brew.sh](https://brew.sh/), open a new terminal, and
-check that `brew --version` works. On Linux or WSL2, also follow Homebrew's
-printed `brew shellenv` instructions before retrying.
+This applies to macOS. Install Homebrew from [brew.sh](https://brew.sh/), open a
+new terminal, and check that `brew --version` works.
+
+</details>
+
+<details>
+<summary><code>missing: xz unzip</code></summary>
+
+Install the packages the error names with your distribution's package manager;
+the error prints the command for Debian/Ubuntu, Fedora/RHEL, and Alpine. Nothing
+was downloaded yet.
+
+</details>
+
+<details>
+<summary><code>GitHub API rate limit reached</code></summary>
+
+Anonymous GitHub API requests are limited per IP address, which shared CI
+runners and offices hit quickly. Set `GITHUB_TOKEN` (any token works; no scopes
+are needed) and run the installer again. Already installed tools are skipped.
+
+</details>
+
+<details>
+<summary><code>checksum mismatch</code></summary>
+
+The downloaded file does not match the digest GitHub records for the release
+asset, so it was not installed. Run the installer again; if it persists, report
+it to the tool's project.
 
 </details>
 
@@ -275,7 +320,9 @@ installer leaves an invalid file unchanged.
 
 ## Project scope
 
-- macOS and Linux with Homebrew; CI covers macOS and Ubuntu
+- macOS with Homebrew; Linux with release binaries or Homebrew. CI covers macOS,
+  Ubuntu on x86_64 and arm64, and a root-only Ubuntu container, and reruns daily
+  against the latest tool releases
 - Windows through WSL2; CI smoke-tests Ubuntu on WSL2, while native Windows is
   unsupported
 - language-independent tools in the root installer
