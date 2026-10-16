@@ -22,6 +22,63 @@ for tool in go_workspace go_search go_file_context go_package_api go_symbol_refe
 	}
 done
 
+# Usefulness, not just presence: find the callers of (*users.Store).Get in a
+# module where a cache, an HTTP client and url.Values all have a Get too.
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
+mkdir -p "${work}/cache" "${work}/users" "${work}/orders"
+printf 'module example.com/svc\n\ngo 1.21\n' >"${work}/go.mod"
+cat >"${work}/cache/cache.go" <<'EOF'
+package cache
+
+type Cache struct{ m map[string]string }
+
+func (c *Cache) Get(key string) (string, bool) { v, ok := c.m[key]; return v, ok }
+EOF
+cat >"${work}/users/users.go" <<'EOF'
+package users
+
+import (
+	"net/http"
+
+	"example.com/svc/cache"
+)
+
+type Store struct{ c *cache.Cache }
+
+func (s *Store) Get(id string) (string, bool) { return s.c.Get("user:" + id) }
+
+func Handler(s *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name, _ := s.Get(r.URL.Query().Get("id"))
+		if resp, err := http.Get("https://audit.internal/log?u=" + name); err == nil {
+			resp.Body.Close()
+		}
+	}
+}
+EOF
+cat >"${work}/orders/orders.go" <<'EOF'
+package orders
+
+import "example.com/svc/users"
+
+type Repo struct{ users *users.Store }
+
+func (r *Repo) Owner(orderID string) string {
+	name, _ := r.users.Get(orderID)
+	return name
+}
+EOF
+textual=$(grep -rho '\.Get(' "${work}" --include='*.go' | wc -l | tr -d ' ')
+line=$(grep -n 'func (s \*Store) Get' "${work}/users/users.go" | cut -d: -f1)
+col=$(awk -v l="${line}" 'NR == l { print index($0, "Get(") }' "${work}/users/users.go")
+semantic=$(cd "${work}" && gopls references "users/users.go:${line}:${col}" 2>/dev/null | grep -c '\.go:' || true)
+[ "${semantic}" -eq 2 ] || {
+	printf 'gopls found %s references to (*Store).Get, expected 2\n' "${semantic}" >&2
+	exit 1
+}
+printf 'renaming (*Store).Get: grep sees %s .Get( calls, gopls finds the %s real callers\n' "${textual}" "${semantic}"
+
 configured=0
 if command -v codex >/dev/null 2>&1; then
 	codex mcp get gopls --json >/dev/null
