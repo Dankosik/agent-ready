@@ -229,7 +229,8 @@ a self-contained bundle:
 - versions live under `~/.local/share/agent-ready/codegraph/versions/`, and
   only the launcher is linked into `~/.local/bin` (or `AGENT_READY_BIN_DIR`);
 - `--upgrade` updates that copy and prunes older versions; a `codegraph`
-  installed with npm or upstream's script is left alone;
+  installed with npm or upstream's script is not replaced (MCP wiring and
+  telemetry still apply);
 - the installer turns anonymous usage telemetry off after wiring. Re-enable it
   with `codegraph telemetry on`.
 
@@ -241,15 +242,17 @@ cd your-project
 codegraph init
 ```
 
-That creates a local `.codegraph/` index and keeps it current as you edit; add
-`.codegraph/` to `.gitignore` rather than committing it. The shared routing
-instructions use the index only when that directory exists. Without one, the
-agent keeps using `rg`, `ast-grep`, and `Read`, and does not run `codegraph init`
-on its own.
+That creates a local `.codegraph/` index; a running MCP server keeps it current
+as you edit. Without an MCP connection — for example an agent CodeGraph does not
+support — run `codegraph sync` after edits to refresh its symbol list; `explore`
+still reads the source from disk. Add `.codegraph/` to `.gitignore` rather than
+committing it. The shared routing instructions use the index only when that
+directory exists. Without one, the agent keeps using `rg`, `ast-grep`, and
+`Read`, and does not run `codegraph init` on its own.
 
 The shared entry is deliberately one line: the tool, what it indexes, its two
-entry points, and the no-index rule. The full command list stays in
-`codegraph --help`, where it costs nothing until it is needed.
+entry points, when to trust its output, and the no-index rule. The full command
+list stays in `codegraph --help`, where it costs nothing until it is needed.
 
 MCP wiring is delegated to CodeGraph's own installer, which knows each agent's
 config shape. Automatic installation passes `--target=auto`, so CodeGraph wires
@@ -388,6 +391,9 @@ The project has no `.codegraph/` index. Run `codegraph init` in the repository
 root once; a running MCP server picks the new index up without a restart. The
 installer does not index repositories; the shared instructions deliberately
 leave that decision to you.
+
+On WSL with the repository on a Windows drive, CodeGraph keeps its index in
+`.codegraph-wsl/` instead; the command still works there.
 
 </details>
 

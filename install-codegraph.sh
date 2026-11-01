@@ -7,7 +7,7 @@
 # the SHA-256 digest GitHub records for that asset, unpacks it into a versioned
 # directory, and links only the launcher onto PATH. The installed tag is
 # recorded under ~/.config/agent-ready so --upgrade only touches an install this
-# script owns; a codegraph from npm or the upstream installer is left alone.
+# script owns; a codegraph from npm or the upstream installer is not replaced.
 #
 # Usage: install-codegraph.sh [--upgrade]
 

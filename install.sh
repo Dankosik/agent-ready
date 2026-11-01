@@ -85,7 +85,7 @@ fi
 # CodeGraph publishes no Homebrew formula and ships one self-contained bundle per
 # platform, so it comes from its release archive whichever way the other tools
 # are installed. A copy this installer did not create (npm or upstream's own
-# installer) is kept as it is.
+# installer) is kept rather than replaced.
 codegraph_state="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready/codegraph"
 if [ "${install_tools}" -eq 1 ]; then
 	if command -v codegraph >/dev/null 2>&1 && [ ! -f "${codegraph_state}" ]; then

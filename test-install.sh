@@ -119,7 +119,9 @@ for target in \
 	[ "$(rg -c '^<!-- agent-ready:start -->$' "${target}")" -eq 1 ]
 	[ "$(rg -c '^<!-- agent-ready:end -->$' "${target}")" -eq 1 ]
 	rg -q '^Tool routing:$' "${target}"
-	rg -qF 'Code graph: CodeGraph is a local index of symbols, calls, and imports' "${target}"
+	rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${target}"
+	rg -qF 'unless it flags staleness' "${target}"
+	rg -qF 'never `codegraph init` unasked' "${target}"
 	if rg -q '^- Go:' "${target}"; then
 		printf 'generic install unexpectedly included Go routing in %s\n' "${target}" >&2
 		exit 1
@@ -267,7 +269,7 @@ if rg -q '^install ' "${targeted_windsurf_home}/codegraph-calls"; then
 	exit 1
 fi
 rg -qx 'telemetry off' "${targeted_windsurf_home}/codegraph-calls"
-rg -qF 'Code graph: CodeGraph is a local index of symbols, calls, and imports' "${targeted_windsurf_home}/.codeium/windsurf/memories/global_rules.md"
+rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${targeted_windsurf_home}/.codeium/windsurf/memories/global_rules.md"
 
 language_home="${work}/language-home"
 mkdir -p "${language_home}/.cursor"

@@ -7,4 +7,4 @@ Tool routing:
 - Docs/diffs: `mdq <query> <file>` for Markdown sections; `git -c diff.external='difft --display inline' diff` for code diffs.
 - Checks: `shellcheck` for shell, `actionlint` for workflows, `gitleaks dir --redact .` for files, `gitleaks git --redact .` for history.
 - Benchmarks: `hyperfine --warmup 3` for performance comparisons.
-- Code graph: CodeGraph is a local index of symbols, calls, and imports. With `.codegraph/`, `codegraph_explore` (MCP) or `codegraph explore "<question>"` (CLI) answers how code works, who calls what, and what a change affects in one call with the source — use it first and don't re-read it. No index: normal routing; never `codegraph init`.
+- Code graph: CodeGraph is a local graph of symbols, calls, and imports. With `.codegraph/`, `codegraph_explore` (MCP) or `codegraph explore "<question>"` (CLI) answers how code works, who calls what, and what a change affects in one call with the source — use it first and don't re-read it unless it flags staleness. No index: normal routing; never `codegraph init` unasked.
