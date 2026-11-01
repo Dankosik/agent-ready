@@ -17,11 +17,18 @@ for people who run its installers against real machines and real agent configs.
 - Release-binary installs (`install-binaries.sh`) must verify the GitHub SHA-256
   digest before unpacking, write only to the binary directory and the
   agent-ready state file, and send `GITHUB_TOKEN` only to `api.github.com`.
+- Release-bundle installs (`install-codegraph.sh`) must verify the GitHub
+  SHA-256 digest before unpacking, write only to the versioned bundle directory,
+  the launcher symlink, and the agent-ready state file, and must not replace a
+  `codegraph` installation they do not own.
 
 ## Protect user machines
 
 - Treat changes to `install.sh`, `bootstrap.sh`, hooks, MCP configuration, and
   instruction files as security-sensitive migrations.
+- CodeGraph MCP wiring stays delegated to `codegraph install`, non-interactive,
+  with `--no-permissions`, and only after the managed instruction blocks have
+  been validated.
 - Never use `sudo`, delete unrelated user data, replace an entire existing
   config, or write outside the documented config paths.
 - Preserve existing content, validate before replacing, use same-directory
@@ -54,8 +61,8 @@ for people who run its installers against real machines and real agent configs.
 Run the checks that apply to the exact candidate. The full acceptance ladder is:
 
 ```bash
-rtk bash -n bootstrap.sh install.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
-rtk shellcheck bootstrap.sh install.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
+rtk bash -n bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
+rtk shellcheck bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh
 rtk actionlint
 rtk gitleaks dir --redact .
 rtk gitleaks git --redact .

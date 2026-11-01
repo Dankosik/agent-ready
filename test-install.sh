@@ -26,6 +26,11 @@ cat >"${fake_bin}/gopls" <<'EOF'
 exit 0
 EOF
 chmod +x "${fake_bin}/gopls"
+cat >"${fake_bin}/codegraph" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"${HOME}/codegraph-calls"
+EOF
+chmod +x "${fake_bin}/codegraph"
 cat >"${fake_bin}/brew" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"${HOME}/brew-calls"
@@ -114,11 +119,21 @@ for target in \
 	[ "$(rg -c '^<!-- agent-ready:start -->$' "${target}")" -eq 1 ]
 	[ "$(rg -c '^<!-- agent-ready:end -->$' "${target}")" -eq 1 ]
 	rg -q '^Tool routing:$' "${target}"
+	rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${target}"
+	rg -qF 'unless it flags staleness' "${target}"
+	rg -qF 'never `codegraph init` unasked' "${target}"
 	if rg -q '^- Go:' "${target}"; then
 		printf 'generic install unexpectedly included Go routing in %s\n' "${target}" >&2
 		exit 1
 	fi
 done
+
+# The shared block is sent with every prompt; keep the CodeGraph line terse.
+graph_line=$(rg '^- Code graph:' "${fake_home}/.codex/AGENTS.md")
+[ "${#graph_line}" -le 400 ] || {
+	printf 'CodeGraph routing line is %s characters; keep it under 400\n' "${#graph_line}" >&2
+	exit 1
+}
 
 rg -q '^user claude$' "${fake_home}/.claude/CLAUDE.md"
 [ -L "${fake_home}/.claude/CLAUDE.md" ]
@@ -143,8 +158,10 @@ jq -e '
 	([.hooks.sessionStart[] | select(.command == "./hooks/existing.sh")] | length) == 1 and
 	([.hooks.sessionStart[] | select(.command == "cat ./hooks/agent-ready-session-start.json")] | length) == 1
 ' "${fake_home}/.cursor/hooks.json" >/dev/null
-jq -e '.additional_context | contains("Tool routing:")' \
+jq -e '.additional_context | contains("Tool routing:") and contains("Code graph:")' \
 	"${fake_home}/.cursor/hooks/agent-ready-session-start.json" >/dev/null
+rg -qF 'install --yes --target=auto --location=global --no-permissions' "${fake_home}/codegraph-calls"
+rg -qx 'telemetry off' "${fake_home}/codegraph-calls"
 
 mkdir -p "${fake_home}/.config/agent-ready/languages"
 printf 'enabled\n' >"${fake_home}/.config/agent-ready/languages/go"
@@ -217,6 +234,7 @@ for untouched in \
 done
 [ "$(wc -l <"${targeted_home}/rtk-calls" | tr -d ' ')" -eq 1 ]
 rg -qF 'init -g --codex --no-trust-filters' "${targeted_home}/rtk-calls"
+rg -qF 'install --yes --target=codex --location=global --no-permissions' "${targeted_home}/codegraph-calls"
 
 targeted_cursor_home="${work}/targeted-cursor-home"
 mkdir -p "${targeted_cursor_home}"
@@ -228,6 +246,7 @@ rg -qF 'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
 [ ! -e "${targeted_cursor_home}/.claude" ]
 jq -e '([.hooks.sessionStart[] | select(.command == "cat ./hooks/agent-ready-session-start.json")] | length) == 1' \
 	"${targeted_cursor_home}/.cursor/hooks.json" >/dev/null
+rg -qF 'install --yes --target=cursor --location=global --no-permissions' "${targeted_cursor_home}/codegraph-calls"
 
 targeted_opencode_home="${work}/targeted-opencode-home"
 mkdir -p "${targeted_opencode_home}"
@@ -236,7 +255,21 @@ XDG_CONFIG_HOME="${targeted_opencode_home}/.config" \
 	"${root}/bootstrap.sh" open-code --configure-only >/dev/null
 rg -qF 'init -g --opencode --no-trust-filters' "${targeted_opencode_home}/rtk-calls"
 rg -q '^Tool routing:$' "${targeted_opencode_home}/.config/opencode/AGENTS.md"
+rg -qF 'install --yes --target=opencode --location=global --no-permissions' "${targeted_opencode_home}/codegraph-calls"
 [ ! -e "${targeted_opencode_home}/.codex" ]
+
+targeted_windsurf_home="${work}/targeted-windsurf-home"
+mkdir -p "${targeted_windsurf_home}"
+HOME="${targeted_windsurf_home}" PATH="${test_path}" \
+	XDG_CONFIG_HOME="${targeted_windsurf_home}/.config" \
+	"${root}/bootstrap.sh" windsurf --configure-only >"${work}/windsurf.out" 2>&1
+rg -qF 'MCP setup is not available for windsurf' "${work}/windsurf.out"
+if rg -q '^install ' "${targeted_windsurf_home}/codegraph-calls"; then
+	printf 'unsupported CodeGraph target was wired anyway\n' >&2
+	exit 1
+fi
+rg -qx 'telemetry off' "${targeted_windsurf_home}/codegraph-calls"
+rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${targeted_windsurf_home}/.codeium/windsurf/memories/global_rules.md"
 
 language_home="${work}/language-home"
 mkdir -p "${language_home}/.cursor"
@@ -307,7 +340,7 @@ fi
 malformed_home="${work}/malformed-home"
 malformed_bin="${work}/malformed-bin"
 mkdir -p "${malformed_home}/.claude" "${malformed_bin}"
-cp "${fake_bin}/claude" "${fake_bin}/rtk" "${malformed_bin}/"
+cp "${fake_bin}/claude" "${fake_bin}/rtk" "${fake_bin}/codegraph" "${malformed_bin}/"
 cat >"${malformed_home}/.claude/CLAUDE.md" <<'EOF'
 keep this
 <!-- agent-ready:start -->
@@ -392,13 +425,39 @@ publish_all() {
 	publish sharkdp/hyperfine "v${v}" hyperfine "hyperfine-v${v}-x86_64-unknown-linux-musl.tar.gz" \
 		"hyperfine-v${v}-aarch64-unknown-linux-musl.tar.gz"
 }
+# publish_codegraph <tag> — one release with the four platform bundles, each a
+# codegraph-<os>-<arch>/bin/codegraph exactly like the upstream archive.
+publish_codegraph() {
+	local tag="$1" targets target name stage dir
+	targets="darwin-x64 darwin-arm64 linux-x64 linux-arm64"
+	stage="${work}/codegraph-stage/${tag}"
+	dir="${gh_assets}/colbymchenry/codegraph/${tag}"
+	rm -rf "${stage}"
+	mkdir -p "${stage}" "${dir}" "${gh_api}/repos/colbymchenry/codegraph/releases"
+	for target in ${targets}; do
+		name="codegraph-${target}"
+		mkdir -p "${stage}/${name}/bin"
+		cat >"${stage}/${name}/bin/codegraph" <<EOF
+#!/bin/sh
+printf '%s %s\n' "${tag}" "\$*" >>"\${HOME}/codegraph-calls"
+EOF
+		chmod +x "${stage}/${name}/bin/codegraph"
+		tar -czf "${dir}/${name}.tar.gz" -C "${stage}" "${name}"
+	done
+	for target in ${targets}; do
+		name="codegraph-${target}.tar.gz"
+		jq -n --arg name "${name}" --arg digest "sha256:$(digest_of "${dir}/${name}")" \
+			--arg url "file://${dir}/${name}" '{name: $name, digest: $digest, browser_download_url: $url}'
+	done | jq -s --arg tag "${tag}" '{tag_name: $tag, assets: .}' >"${gh_api}/repos/colbymchenry/codegraph/releases/latest"
+}
 publish_all 1.0.0
+publish_codegraph v9.9.9
 
 # A PATH with the base system tools but no jq, so the jq bootstrap runs too.
 base_bin="${work}/base-bin"
 mkdir -p "${base_bin}"
 for command in bash sh env curl tar gzip xz unzip python3 sha256sum shasum awk sed grep find \
-	mktemp cp chmod mv rm mkdir cut head uname cat dirname basename tr sort readlink cmp wc; do
+	mktemp cp chmod mv rm mkdir ln cut head uname cat dirname basename tr sort readlink cmp wc; do
 	path=$(command -v "${command}" || true)
 	[ -z "${path}" ] || ln -s "${path}" "${base_bin}/${command}"
 done
@@ -416,7 +475,7 @@ run_binaries() {
 }
 bins="${binary_home}/.local/bin"
 state="${binary_home}/.config/agent-ready/binaries"
-expected_bins="jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine"
+expected_bins="jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine codegraph"
 
 run_binaries >"${work}/binaries.out"
 for bin in ${expected_bins}; do
@@ -426,6 +485,11 @@ done
 [ "$(wc -l <"${state}" | tr -d ' ')" -eq 15 ]
 rg -qx 'ripgrep 1.0.0' "${state}"
 rg -qF 'jq jq-1.0.0 installed' "${work}/binaries.out"
+rg -qF 'codegraph v9.9.9 installed' "${work}/binaries.out"
+[ -L "${bins}/codegraph" ]
+rg -qx 'v9.9.9' "${binary_home}/.config/agent-ready/codegraph"
+rg -qF 'v9.9.9 install --yes --target=codex --location=global --no-permissions' \
+	"${binary_home}/codegraph-calls"
 rg -qF 'init -g --codex --no-trust-filters' "${binary_home}/binary-calls"
 rg -q '^Tool routing:$' "${binary_home}/.codex/AGENTS.md"
 rg -qF 'is not on PATH' "${work}/binaries.out"
@@ -434,13 +498,14 @@ rg -qF 'is not on PATH' "${work}/binaries.out"
 mv "${gh_api}" "${gh_api}.offline"
 run_binaries >"${work}/binaries.out"
 mv "${gh_api}.offline" "${gh_api}"
-[ "$(rg -c 'already installed$' "${work}/binaries.out")" -eq 15 ]
+[ "$(rg -c 'already installed$' "${work}/binaries.out")" -eq 16 ]
 
 # --upgrade downloads only what changed upstream.
 publish BurntSushi/ripgrep 2.0.0 rg ripgrep-2.0.0-x86_64-unknown-linux-musl.tar.gz
 run_binaries --upgrade >"${work}/binaries.out"
 rg -qF 'ripgrep 2.0.0 installed' "${work}/binaries.out"
-[ "$(rg -c 'is up to date$' "${work}/binaries.out")" -eq 14 ]
+rg -qF 'codegraph v9.9.9 is up to date' "${work}/binaries.out"
+[ "$(rg -c 'is up to date$' "${work}/binaries.out")" -eq 15 ]
 rg -qx 'ripgrep 2.0.0' "${state}"
 
 # A digest mismatch installs nothing and fails.
@@ -506,5 +571,74 @@ HOME="${go_home}" PATH="${go_bin}:${base_bin}" XDG_CONFIG_HOME="${go_home}/.conf
 	"${root}/languages/go/install.sh" --agent codex >/dev/null
 rg -qxF "GOBIN=${go_home}/.local/bin install golang.org/x/tools/gopls@latest" "${go_home}/go-calls"
 [ -x "${go_home}/.local/bin/gopls" ]
+
+# CodeGraph is a self-contained bundle: versioned directory, launcher symlink,
+# digest check, and no upgrade of an installation this script does not own.
+cg_home="${work}/codegraph-home"
+mkdir -p "${cg_home}"
+cg_bins="${cg_home}/.local/bin"
+cg_state="${cg_home}/.config/agent-ready/codegraph"
+cg_versions="${cg_home}/.local/share/agent-ready/codegraph/versions"
+run_codegraph() {
+	HOME="${cg_home}" PATH="${test_path}" \
+		XDG_CONFIG_HOME="${cg_home}/.config" \
+		AGENT_READY_OS=Linux AGENT_READY_ARCH=x86_64 \
+		AGENT_READY_GITHUB_API="file://${gh_api}" \
+		"${root}/install-codegraph.sh" "$@"
+}
+
+run_codegraph >"${work}/codegraph.out"
+rg -qF 'codegraph v9.9.9 installed' "${work}/codegraph.out"
+[ -L "${cg_bins}/codegraph" ]
+[ "$(readlink "${cg_bins}/codegraph")" = "${cg_versions}/v9.9.9/bin/codegraph" ]
+rg -qx 'v9.9.9' "${cg_state}"
+
+# A rerun needs no network at all.
+mv "${gh_api}" "${gh_api}.offline"
+run_codegraph >"${work}/codegraph.out"
+mv "${gh_api}.offline" "${gh_api}"
+rg -qF 'codegraph v9.9.9 already installed' "${work}/codegraph.out"
+
+# --upgrade replaces the bundle and prunes the version it replaced.
+publish_codegraph v9.10.0
+run_codegraph --upgrade >"${work}/codegraph.out"
+rg -qF 'codegraph v9.10.0 installed' "${work}/codegraph.out"
+rg -qx 'v9.10.0' "${cg_state}"
+[ "$(readlink "${cg_bins}/codegraph")" = "${cg_versions}/v9.10.0/bin/codegraph" ]
+[ ! -e "${cg_versions}/v9.9.9" ]
+
+# A digest mismatch installs nothing.
+jq --arg name "codegraph-linux-x64.tar.gz" \
+	'(.assets[] | select(.name == $name).digest) = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
+	"${gh_api}/repos/colbymchenry/codegraph/releases/latest" >"${work}/codegraph.json"
+cp "${work}/codegraph.json" "${gh_api}/repos/colbymchenry/codegraph/releases/latest"
+rm -f "${cg_bins}/codegraph" "${cg_state}"
+if run_codegraph >"${work}/codegraph.out" 2>&1; then
+	printf 'codegraph checksum mismatch unexpectedly succeeded\n' >&2
+	exit 1
+fi
+rg -qF 'codegraph: checksum mismatch' "${work}/codegraph.out"
+[ ! -e "${cg_bins}/codegraph" ]
+publish_codegraph v9.10.0
+
+# A codegraph installed by npm or upstream is left in place, not shadowed.
+kept_home="${work}/codegraph-kept-home"
+mkdir -p "${kept_home}/.local/bin"
+printf '#!/bin/sh\nexit 0\n' >"${kept_home}/.local/bin/codegraph"
+chmod +x "${kept_home}/.local/bin/codegraph"
+cp "${kept_home}/.local/bin/codegraph" "${work}/codegraph-kept-before"
+HOME="${kept_home}" PATH="${test_path}" XDG_CONFIG_HOME="${kept_home}/.config" \
+	AGENT_READY_OS=Linux AGENT_READY_ARCH=x86_64 AGENT_READY_GITHUB_API="file://${gh_api}" \
+	"${root}/install-codegraph.sh" >"${work}/codegraph.out"
+rg -qF 'keeping the existing installation' "${work}/codegraph.out"
+cmp -s "${work}/codegraph-kept-before" "${kept_home}/.local/bin/codegraph"
+
+if HOME="${cg_home}" PATH="${test_path}" XDG_CONFIG_HOME="${cg_home}/.config" \
+	AGENT_READY_OS=Linux AGENT_READY_ARCH=riscv64 AGENT_READY_GITHUB_API="file://${gh_api}" \
+	"${root}/install-codegraph.sh" >"${work}/codegraph.out" 2>&1; then
+	printf 'unsupported architecture unexpectedly succeeded\n' >&2
+	exit 1
+fi
+rg -qF 'unsupported architecture: riscv64' "${work}/codegraph.out"
 
 printf 'installer routing checks passed\n'
