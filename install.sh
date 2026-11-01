@@ -82,6 +82,25 @@ elif [ "${install_tools}" -eq 1 ]; then
 	fi
 fi
 
+# CodeGraph publishes no Homebrew formula and ships one self-contained bundle per
+# platform, so it comes from its release archive whichever way the other tools
+# are installed. A copy this installer did not create (npm or upstream's own
+# installer) is kept as it is.
+codegraph_state="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready/codegraph"
+if [ "${install_tools}" -eq 1 ]; then
+	if command -v codegraph >/dev/null 2>&1 && [ ! -f "${codegraph_state}" ]; then
+		printf 'codegraph: keeping the existing installation\n'
+	elif command -v codegraph >/dev/null 2>&1 && [ "${upgrade_tools}" -eq 0 ]; then
+		printf 'codegraph already installed\n'
+	elif [ "${upgrade_tools}" -eq 1 ]; then
+		bash "${root}/install-codegraph.sh" --upgrade
+		PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
+	else
+		bash "${root}/install-codegraph.sh"
+		PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
+	fi
+fi
+
 # Installing a tool is not the same as the agent using it. Measured on real
 # session transcripts, an agent reaches for the command it already knows —
 # `grep` over `rg`, `git worktree` over a wrapper — unless something tells it
@@ -112,6 +131,30 @@ if [ -f "${agent_ready_config}/languages/go" ]; then
 fi
 cleanup_routing() { [ -z "${routing_tmp}" ] || rm -f "${routing_tmp}"; }
 trap cleanup_routing EXIT
+
+# CodeGraph's installer knows each agent's MCP config shape, including
+# OpenCode 2's `mcp.servers` migration, so the wiring is delegated to it rather
+# than reimplemented here. --no-permissions keeps it out of the agent's
+# auto-allow list, and telemetry is turned off afterwards.
+configure_codegraph() {
+	local target
+	command -v codegraph >/dev/null 2>&1 || return 0
+	case "${agent}" in
+	auto) target=auto ;;
+	claude | codex | cursor | opencode | gemini) target="${agent}" ;;
+	copilot) target=copilot-cli ;;
+	*)
+		printf 'CodeGraph: MCP setup is not available for %s; the CLI routing still applies\n' "${agent}" >&2
+		target=
+		;;
+	esac
+	if [ -n "${target}" ]; then
+		codegraph install --yes --target="${target}" --location=global --no-permissions ||
+			printf 'CodeGraph: MCP setup failed; run codegraph install manually\n' >&2
+	fi
+	codegraph telemetry off >/dev/null 2>&1 ||
+		printf 'CodeGraph: could not disable telemetry; run codegraph telemetry off\n' >&2
+}
 
 command -v rtk >/dev/null 2>&1 || {
 	printf 'rtk is not installed; run %s first\n' "$0" >&2
@@ -333,5 +376,9 @@ if [ "${agent}" = goose ] || { [ "${agent}" = auto ] && command -v goose >/dev/n
 	found=1
 	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/goose/AGENTS.md" "goose"
 fi
+
+# Run last: a malformed instructions file must stop the installer before a
+# third-party installer gets a chance to edit it.
+configure_codegraph
 
 [ "${found}" -eq 1 ] || printf 'No supported harness found; rerun %s --configure-only after installing one\n' "$0"

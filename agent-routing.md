@@ -7,3 +7,4 @@ Tool routing:
 - Docs/diffs: `mdq <query> <file>` for Markdown sections; `git -c diff.external='difft --display inline' diff` for code diffs.
 - Checks: `shellcheck` for shell, `actionlint` for workflows, `gitleaks dir --redact .` for files, `gitleaks git --redact .` for history.
 - Benchmarks: `hyperfine --warmup 3` for performance comparisons.
+- Code graph: with a `.codegraph/` index, `codegraph_explore` (MCP) or `codegraph explore "<question>"` (CLI) answers "how does X work", callers, and change impact in one call with the source — use it first and don't re-read that source. No index: normal routing; never `codegraph init`.

@@ -580,6 +580,75 @@ check_mdq() {
 	finish
 }
 
+# ----------------------------------------------------------- codegraph
+check_codegraph() {
+	have codegraph || return 0
+	start codegraph "which callers reach Store.Get, when three other types have a Get too"
+	local repo="${work}/codegraph-repo" plain textual callers explored
+	mkdir -p "${repo}/cache" "${repo}/users" "${repo}/orders"
+	git -C "${repo}" init -q
+	printf 'module example.com/svc\n\ngo 1.21\n' >"${repo}/go.mod"
+	cat >"${repo}/cache/cache.go" <<'EOF'
+package cache
+
+type Cache struct{ m map[string]string }
+
+func (c *Cache) Get(key string) (string, bool) { v, ok := c.m[key]; return v, ok }
+EOF
+	cat >"${repo}/users/users.go" <<'EOF'
+package users
+
+import (
+	"net/http"
+
+	"example.com/svc/cache"
+)
+
+type Store struct{ c *cache.Cache }
+
+func (s *Store) Get(id string) (string, bool) { return s.c.Get("user:" + id) }
+
+func Handler(s *Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name, _ := s.Get(r.URL.Query().Get("id"))
+		if resp, err := http.Get("https://audit.internal/log?u=" + name); err == nil {
+			resp.Body.Close()
+		}
+	}
+}
+EOF
+	cat >"${repo}/orders/orders.go" <<'EOF'
+package orders
+
+import "example.com/svc/users"
+
+type Repo struct{ users *users.Store }
+
+func (r *Repo) Owner(orderID string) string {
+	name, _ := r.users.Get(orderID)
+	return name
+}
+EOF
+	# No index yet: the tool must decline instead of building one.
+	plain=$(codegraph explore "how does an order read a user" --path "${repo}" 2>&1 || true)
+	claim "codegraph declines an unindexed project" grep -q 'no \.codegraph/ index exists' <<<"${plain}"
+	claim "and creates no index on its own" test ! -e "${repo}/.codegraph"
+
+	codegraph init --yes "${repo}" >/dev/null 2>&1
+	textual=$(grep -rh '\.Get(' "${repo}" --include='*.go' | wc -l | tr -d ' ')
+	callers=$(codegraph callers Get --file users/users.go --json --path "${repo}" | jq '[.definitions[].callers[]] | length')
+	explored=$(codegraph explore "how does an order read a user from the cache" --path "${repo}")
+	row "without" "grep '\\.Get(' → ${textual} matches; a text search cannot tell the receivers apart"
+	row "with" "codegraph callers Get --file users/users.go → ${callers} real callers"
+	row "explore" "one call returned $(grep -c '^```go$' <<<"${explored}") source blocks and both sides of the call path"
+	claim "grep finds more matches than real callers" test "${textual}" -gt "${callers}"
+	claim "codegraph names both real callers" test "${callers}" -eq 2
+	claim "explore returned the caller in orders" grep -q 'func (r \*Repo) Owner' <<<"${explored}"
+	claim "explore returned the definition in cache" grep -q 'func (c \*Cache) Get' <<<"${explored}"
+	row "verdict" "receiver-aware edges in one call, with no build step and no files read by hand"
+	finish
+}
+
 # ---------------------------------------------------------- hyperfine
 check_hyperfine() {
 	have hyperfine || return 0
@@ -630,6 +699,7 @@ check_shellcheck
 check_difftastic
 check_yq
 check_mdq
+check_codegraph
 check_hyperfine
 
 printf '\n%s\n' "$(printf '%.0s─' $(seq 1 64))"

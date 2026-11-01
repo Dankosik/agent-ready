@@ -6,7 +6,7 @@
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="platform macOS and Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey">
   <a href="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="15 generic tools" src="https://img.shields.io/badge/generic_tools-15-brightgreen">
+  <img alt="16 generic tools" src="https://img.shields.io/badge/generic_tools-16-brightgreen">
 </p>
 
 <p align="center">
@@ -43,7 +43,7 @@ sudo apt-get install -y curl ca-certificates xz-utils unzip
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.1.0/bootstrap.sh | AGENT_READY_REF=v1.1.0 bash
 ```
 
-That's it. The installer adds 15 language-independent tools and configures
+That's it. The installer adds 16 language-independent tools and configures
 Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI, and Windsurf when it
 finds them. Start a new agent session after the command finishes.
 
@@ -203,6 +203,7 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.1.0/bootstr
 
 | Job | Tools |
 |---|---|
+| Code intelligence | [`codegraph`](https://github.com/colbymchenry/codegraph) |
 | Compact output | [`rtk`](https://github.com/rtk-ai/rtk) |
 | Search and edit | [`ripgrep`](https://github.com/BurntSushi/ripgrep), [`ast-grep`](https://ast-grep.github.io/), [`sd`](https://github.com/chmln/sd) |
 | Python and data | [`uv`](https://docs.astral.sh/uv/), [`jq`](https://jqlang.org/), [`yq`](https://mikefarah.gitbook.io/yq/), [`mdq`](https://github.com/yshavit/mdq) |
@@ -211,6 +212,52 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.1.0/bootstr
 
 The generic installer and language installers are separate. Adding Go support
 does not change the base tool list.
+
+## Code intelligence
+
+`codegraph` builds a local knowledge graph of a repository and answers
+structural questions from it — the source of the symbols involved, the call
+paths between them, and what a change would touch — instead of making the agent
+grep and read files one at a time.
+
+Upstream publishes no Homebrew formula, so it is installed from its release
+archive on macOS and Linux alike — about 60 MB on the first run; later runs
+reuse the recorded release. Because that archive is a self-contained bundle:
+
+- the SHA-256 digest GitHub records for the asset is checked before unpacking;
+- versions live under `~/.local/share/agent-ready/codegraph/versions/`, and
+  only the launcher is linked into `~/.local/bin` (or `AGENT_READY_BIN_DIR`);
+- `--upgrade` updates that copy and prunes older versions; a `codegraph`
+  installed with npm or upstream's script is left alone;
+- anonymous usage telemetry is turned off after installation. Re-enable it with
+  `codegraph telemetry on`.
+
+The graph is per project. Agent Ready installs the CLI; it does not index your
+repositories. Run this once in each project you want covered:
+
+```bash
+cd your-project
+codegraph init
+```
+
+That creates a local `.codegraph/` index and keeps it current as you edit; add
+`.codegraph/` to `.gitignore` rather than committing it. The shared routing
+instructions use the index only when that directory exists. Without one, the
+agent keeps using `rg`, `ast-grep`, and `Read`, and does not run `codegraph init`
+on its own.
+
+The shared entry is deliberately one line: the tool, its two entry points, and
+the no-index rule. The full command list stays in `codegraph --help`, where it
+costs nothing until it is needed.
+
+MCP wiring is delegated to CodeGraph's own installer, which knows each agent's
+config shape. Automatic installation passes `--target=auto`, so CodeGraph wires
+every agent it detects; an explicit `--agent` passes that agent's target. The
+command is `codegraph install --yes --target=… --location=global
+--no-permissions`, which merges the MCP server entry, adds CodeGraph's own
+marker-fenced section to the agent's instruction file, and (for Claude Code) its
+prompt hook in `settings.json`. Agents CodeGraph does not support still get the
+CLI routing.
 
 ## Safe to run again
 
@@ -221,7 +268,8 @@ MCP configuration are merged instead of replaced.
 Run the same command again whenever you want to refresh the managed
 configuration. Installed tools are not upgraded unless you pass `--upgrade`;
 with release binaries, `--upgrade` downloads only the tools that have a newer
-release. Use `--configure-only` to skip tool installation entirely:
+release, and CodeGraph is upgraded only when Agent Ready installed it. Use
+`--configure-only` to skip tool installation entirely:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.1.0/bootstrap.sh | AGENT_READY_REF=v1.1.0 bash -s -- codex --configure-only
@@ -241,6 +289,7 @@ Quick check:
 rtk --version
 rg --version
 ast-grep --version
+codegraph version
 ```
 
 <details>
@@ -321,6 +370,25 @@ installer leaves an invalid file unchanged.
 
 </details>
 
+<details>
+<summary><code>codegraph: command not found after installation</code></summary>
+
+The launcher is linked into `~/.local/bin` (or `AGENT_READY_BIN_DIR`). Add that
+directory to `PATH` in your shell profile and open a new terminal. The MCP
+configuration uses the `codegraph` name, so the server cannot start until the
+command resolves.
+
+</details>
+
+<details>
+<summary><code>CodeGraph isn't available here</code></summary>
+
+The project has no `.codegraph/` index. Run `codegraph init` in the repository
+root once, then start a new agent session. The installer does not index
+repositories; the shared instructions deliberately leave that decision to you.
+
+</details>
+
 ## Project scope
 
 - macOS with Homebrew; Linux with release binaries or Homebrew. CI covers macOS,
@@ -328,7 +396,8 @@ installer leaves an invalid file unchanged.
   against the latest tool releases
 - Windows through WSL2; CI smoke-tests Ubuntu on WSL2, while native Windows is
   unsupported
-- language-independent tools in the root installer
+- language-independent tools in the root installer, including CodeGraph, which
+  comes from its release bundle because upstream publishes no formula
 - language integrations under `languages/<name>/`
 - runnable verification for every included tool
 
