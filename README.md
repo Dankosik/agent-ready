@@ -221,16 +221,17 @@ paths between them, and what a change would touch — instead of making the agen
 grep and read files one at a time.
 
 Upstream publishes no Homebrew formula, so it is installed from its release
-archive on macOS and Linux alike — about 60 MB on the first run; later runs
-reuse the recorded release. Because that archive is a self-contained bundle:
+archive on macOS and Linux alike — about 60 MB to download and 280 MB unpacked
+on the first run; later runs reuse the recorded release. Because that archive is
+a self-contained bundle:
 
 - the SHA-256 digest GitHub records for the asset is checked before unpacking;
 - versions live under `~/.local/share/agent-ready/codegraph/versions/`, and
   only the launcher is linked into `~/.local/bin` (or `AGENT_READY_BIN_DIR`);
 - `--upgrade` updates that copy and prunes older versions; a `codegraph`
   installed with npm or upstream's script is left alone;
-- anonymous usage telemetry is turned off after installation. Re-enable it with
-  `codegraph telemetry on`.
+- the installer turns anonymous usage telemetry off after wiring. Re-enable it
+  with `codegraph telemetry on`.
 
 The graph is per project. Agent Ready installs the CLI; it does not index your
 repositories. Run this once in each project you want covered:
@@ -246,18 +247,18 @@ instructions use the index only when that directory exists. Without one, the
 agent keeps using `rg`, `ast-grep`, and `Read`, and does not run `codegraph init`
 on its own.
 
-The shared entry is deliberately one line: the tool, its two entry points, and
-the no-index rule. The full command list stays in `codegraph --help`, where it
-costs nothing until it is needed.
+The shared entry is deliberately one line: the tool, what it indexes, its two
+entry points, and the no-index rule. The full command list stays in
+`codegraph --help`, where it costs nothing until it is needed.
 
 MCP wiring is delegated to CodeGraph's own installer, which knows each agent's
 config shape. Automatic installation passes `--target=auto`, so CodeGraph wires
 every agent it detects; an explicit `--agent` passes that agent's target. The
 command is `codegraph install --yes --target=… --location=global
---no-permissions`, which merges the MCP server entry, adds CodeGraph's own
-marker-fenced section to the agent's instruction file, and (for Claude Code) its
-prompt hook in `settings.json`. Agents CodeGraph does not support still get the
-CLI routing.
+--no-permissions`, which merges the MCP server entry, may add CodeGraph's own
+marker-fenced section to the agent's instruction file, and (for Claude Code)
+adds its prompt hook in `settings.json`. Agents CodeGraph does not support still
+get the CLI routing.
 
 ## Safe to run again
 
@@ -384,8 +385,9 @@ command resolves.
 <summary><code>CodeGraph isn't available here</code></summary>
 
 The project has no `.codegraph/` index. Run `codegraph init` in the repository
-root once, then start a new agent session. The installer does not index
-repositories; the shared instructions deliberately leave that decision to you.
+root once; a running MCP server picks the new index up without a restart. The
+installer does not index repositories; the shared instructions deliberately
+leave that decision to you.
 
 </details>
 
