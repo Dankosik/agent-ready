@@ -129,7 +129,20 @@ if [ -f "${agent_ready_config}/languages/go" ]; then
 	} >"${routing_tmp}"
 	routing="${routing_tmp}"
 fi
-cleanup_routing() { [ -z "${routing_tmp}" ] || rm -f "${routing_tmp}"; }
+# `codegraph install` writes its own CodeGraph section into the Claude Code,
+# Codex, Gemini CLI, and OpenCode instruction files, so those files get the
+# block without the Code graph line instead of carrying the same rule twice.
+graph_routing="${routing}"
+graph_routing_tmp=
+if command -v codegraph >/dev/null 2>&1; then
+	graph_routing_tmp=$(mktemp)
+	grep -v '^- Code graph:' "${routing}" >"${graph_routing_tmp}"
+	graph_routing="${graph_routing_tmp}"
+fi
+cleanup_routing() {
+	[ -z "${routing_tmp}" ] || rm -f "${routing_tmp}"
+	[ -z "${graph_routing_tmp}" ] || rm -f "${graph_routing_tmp}"
+}
 trap cleanup_routing EXIT
 
 # CodeGraph's installer knows each agent's MCP config shape, including
@@ -197,7 +210,7 @@ block_state() {
 }
 
 install_block() {
-	local requested="$1" label="$2" target tmp state
+	local requested="$1" label="$2" block="${3:-${routing}}" target tmp state
 	mkdir -p "$(dirname -- "${requested}")"
 	target=$(resolve_target "${requested}")
 	mkdir -p "$(dirname -- "${target}")"
@@ -211,7 +224,7 @@ install_block() {
 	tmp=$(mktemp "${target}.XXXXXX") || return 1
 	cp -p "${target}" "${tmp}"
 	if [ "${state}" = present ]; then
-		awk -v s="${start}" -v e="${end}" -v f="${routing}" '
+		awk -v s="${start}" -v e="${end}" -v f="${block}" '
 			$0 == s { print; while ((getline line < f) > 0) print line; skip = 1; next }
 			$0 == e { skip = 0 }
 			!skip { print }
@@ -221,7 +234,7 @@ install_block() {
 			cat "${target}"
 			[ -s "${target}" ] && printf '\n'
 			printf '%s\n' "${start}"
-			cat "${routing}"
+			cat "${block}"
 			printf '%s\n' "${end}"
 		} >"${tmp}"
 	fi
@@ -319,12 +332,12 @@ found=0
 if [ "${agent}" = claude ] || { [ "${agent}" = auto ] && command -v claude >/dev/null 2>&1; }; then
 	found=1
 	configure_rtk "Claude Code" -g --hook-only --auto-patch --no-trust-filters
-	install_block "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" "Claude Code"
+	install_block "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" "Claude Code" "${graph_routing}"
 fi
 if [ "${agent}" = codex ] || { [ "${agent}" = auto ] && command -v codex >/dev/null 2>&1; }; then
 	found=1
 	configure_rtk "Codex" -g --codex --no-trust-filters
-	install_block "${CODEX_HOME:-${HOME}/.codex}/AGENTS.md" "Codex"
+	install_block "${CODEX_HOME:-${HOME}/.codex}/AGENTS.md" "Codex" "${graph_routing}"
 fi
 if [ "${agent}" = cursor ] || { [ "${agent}" = auto ] && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 || [ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]; }; }; then
 	found=1
@@ -336,7 +349,7 @@ fi
 if [ "${agent}" = gemini ] || { [ "${agent}" = auto ] && command -v gemini >/dev/null 2>&1; }; then
 	found=1
 	configure_rtk "Gemini CLI" -g --gemini --hook-only --auto-patch --no-trust-filters
-	install_block "${HOME}/.gemini/GEMINI.md" "Gemini CLI"
+	install_block "${HOME}/.gemini/GEMINI.md" "Gemini CLI" "${graph_routing}"
 fi
 if [ "${agent}" = copilot ] || { [ "${agent}" = auto ] && command -v copilot >/dev/null 2>&1; }; then
 	found=1
@@ -353,8 +366,9 @@ if [ "${agent}" = grok ] || { [ "${agent}" = auto ] && command -v grok >/dev/nul
 fi
 if [ "${agent}" = opencode ] || { [ "${agent}" = auto ] && command -v opencode >/dev/null 2>&1; }; then
 	found=1
-	configure_rtk "OpenCode" -g --opencode --no-trust-filters
-	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" "OpenCode"
+	configure_rtk "OpenCode" -g --opencode --hook-only --no-patch --no-trust-filters >/dev/null
+	printf 'OpenCode: configured RTK integration\n'
+	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" "OpenCode" "${graph_routing}"
 fi
 if [ "${agent}" = qwen ] || { [ "${agent}" = auto ] && command -v qwen >/dev/null 2>&1; }; then
 	found=1

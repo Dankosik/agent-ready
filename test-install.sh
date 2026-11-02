@@ -119,9 +119,20 @@ for target in \
 	[ "$(rg -c '^<!-- agent-ready:start -->$' "${target}")" -eq 1 ]
 	[ "$(rg -c '^<!-- agent-ready:end -->$' "${target}")" -eq 1 ]
 	rg -q '^Tool routing:$' "${target}"
-	rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${target}"
-	rg -qF 'unless it flags staleness' "${target}"
-	rg -qF 'never `codegraph init` unasked' "${target}"
+	case "${target}" in
+	*/.claude/* | */.codex/* | */.gemini/* | */opencode/*)
+		# `codegraph install` writes its own section into these files.
+		if rg -q '^- Code graph:' "${target}"; then
+			printf 'CodeGraph routing duplicated in %s\n' "${target}" >&2
+			exit 1
+		fi
+		;;
+	*)
+		rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${target}"
+		rg -qF 'unless it flags staleness' "${target}"
+		rg -qF 'never `codegraph init` unasked' "${target}"
+		;;
+	esac
 	if rg -q '^- Go:' "${target}"; then
 		printf 'generic install unexpectedly included Go routing in %s\n' "${target}" >&2
 		exit 1
@@ -129,7 +140,7 @@ for target in \
 done
 
 # The shared block is sent with every prompt; keep the CodeGraph line terse.
-graph_line=$(rg '^- Code graph:' "${fake_home}/.codex/AGENTS.md")
+graph_line=$(rg '^- Code graph:' "${fake_home}/.copilot/copilot-instructions.md")
 [ "${#graph_line}" -le 400 ] || {
 	printf 'CodeGraph routing line is %s characters; keep it under 400\n' "${#graph_line}" >&2
 	exit 1
@@ -191,7 +202,7 @@ for expected in \
 	'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
 	'init -g --gemini --hook-only --auto-patch --no-trust-filters' \
 	'init -g --copilot --hook-only --auto-patch --no-trust-filters' \
-	'init -g --opencode --no-trust-filters'; do
+	'init -g --opencode --hook-only --no-patch --no-trust-filters'; do
 	rg -qF "${expected}" "${fake_home}/rtk-calls"
 done
 
@@ -253,7 +264,8 @@ mkdir -p "${targeted_opencode_home}"
 HOME="${targeted_opencode_home}" PATH="${test_path}" \
 XDG_CONFIG_HOME="${targeted_opencode_home}/.config" \
 	"${root}/bootstrap.sh" open-code --configure-only >/dev/null
-rg -qF 'init -g --opencode --no-trust-filters' "${targeted_opencode_home}/rtk-calls"
+# Without --hook-only, `rtk init --opencode` also writes Claude Code's RTK.md.
+rg -qF 'init -g --opencode --hook-only --no-patch --no-trust-filters' "${targeted_opencode_home}/rtk-calls"
 rg -q '^Tool routing:$' "${targeted_opencode_home}/.config/opencode/AGENTS.md"
 rg -qF 'install --yes --target=opencode --location=global --no-permissions' "${targeted_opencode_home}/codegraph-calls"
 [ ! -e "${targeted_opencode_home}/.codex" ]
@@ -336,6 +348,22 @@ if "${root}/bootstrap.sh" language unknown --configure-only >/dev/null 2>&1; the
 	printf 'unknown language unexpectedly succeeded\n' >&2
 	exit 1
 fi
+
+# Without CodeGraph on PATH nothing else describes it, so the line stays.
+no_graph_home="${work}/no-graph-home"
+no_graph_bin="${work}/no-graph-bin"
+mkdir -p "${no_graph_home}" "${no_graph_bin}"
+cp "${fake_bin}/claude" "${fake_bin}/rtk" "${no_graph_bin}/"
+no_graph_path="${no_graph_bin}"
+while IFS= read -r dir; do
+	[ -x "${dir}/codegraph" ] || no_graph_path="${no_graph_path}:${dir}"
+done <<EOF
+$(printf '%s\n' "${PATH}" | tr ':' '\n')
+EOF
+HOME="${no_graph_home}" PATH="${no_graph_path}" \
+	XDG_CONFIG_HOME="${no_graph_home}/.config" \
+	"${root}/install.sh" --agent claude --configure-only >/dev/null
+rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${no_graph_home}/.claude/CLAUDE.md"
 
 malformed_home="${work}/malformed-home"
 malformed_bin="${work}/malformed-bin"
