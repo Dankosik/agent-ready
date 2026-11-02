@@ -9,6 +9,21 @@ receipt_path() {
 	printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready/receipt"
 }
 
+# An install from v1.2.x or earlier wrote no receipt, so an update can only read
+# the tool mode from the machine: the release-binary state file, then Homebrew,
+# then nothing. The agents were auto-detected by that installer.
+receipt_legacy_tools() {
+	local config
+	config=$(dirname -- "$(receipt_path)")
+	if [ -f "${config}/binaries" ]; then
+		printf 'binaries\n'
+	elif command -v brew >/dev/null 2>&1; then
+		printf 'brew\n'
+	else
+		printf 'none\n'
+	fi
+}
+
 receipt_valid_version() {
 	[[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }

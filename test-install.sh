@@ -796,11 +796,15 @@ EOF
 			--arg url "file://${dir}/${name}" '{name: $name, digest: $digest, browser_download_url: $url}'
 	done | jq -s --arg tag "${tag}" '{tag_name: $tag, assets: .}' >"${gh_api}/repos/colbymchenry/codegraph/releases/latest"
 }
-# publish_agent_ready <tag> [version] — the release archive the release-asset
-# workflow attaches, built from this working tree with the tag's VERSION. The
-# archive therefore holds the real installer and the real agent-ready command.
+# publish_agent_ready <tag> [version] [published_at] [overlay] — the release
+# archive the release-asset workflow attaches, built from this working tree with
+# the tag's VERSION. The archive therefore holds the real installer and the real
+# agent-ready command. It also joins the newest-first releases list the updater
+# reads, and an overlay directory can add files (such as a migration) to that
+# release only.
 publish_agent_ready() {
-	local tag="$1" version="${2:-$1}" name dir stage
+	local tag="$1" version="${2:-$1}" published="${3:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+	local overlay="${4:-}" name dir stage releases entry
 	name="agent-ready-${tag}"
 	dir="${gh_assets}/Dankosik/agent-ready/${tag}"
 	stage="${work}/agent-ready-stage/${tag}"
@@ -809,11 +813,24 @@ publish_agent_ready() {
 	cp -R "${root}/." "${stage}/${name}/"
 	rm -rf "${stage}/${name}/.git" "${stage}/${name}/.codegraph"
 	printf '%s\n' "${version}" >"${stage}/${name}/VERSION"
+	if [ -n "${overlay}" ]; then
+		cp -R "${overlay}/." "${stage}/${name}/"
+	fi
 	tar -czf "${dir}/${name}.tar.gz" -C "${stage}" "${name}"
-	jq -n --arg name "${name}.tar.gz" --arg digest "sha256:$(digest_of "${dir}/${name}.tar.gz")" \
-		--arg url "file://${dir}/${name}.tar.gz" '{name: $name, digest: $digest, browser_download_url: $url}' |
-		jq -s --arg tag "${tag}" '{tag_name: $tag, assets: .}' \
-			>"${gh_api}/repos/Dankosik/agent-ready/releases/tags/${tag}"
+	entry=$(jq -n --arg name "${name}.tar.gz" --arg digest "sha256:$(digest_of "${dir}/${name}.tar.gz")" \
+		--arg url "file://${dir}/${name}.tar.gz" --arg tag "${tag}" --arg published "${published}" \
+		'{tag_name: $tag, draft: false, prerelease: false, published_at: $published,
+			body: ("Notes for " + $tag + "."),
+			assets: [{name: $name, digest: $digest, browser_download_url: $url}]}')
+	printf '%s\n' "${entry}" >"${gh_api}/repos/Dankosik/agent-ready/releases/tags/${tag}"
+	releases="${gh_api}/repos/Dankosik/agent-ready/releases.json"
+	if [ -f "${releases}" ]; then
+		jq -c --argjson entry "${entry}" '[.[] | select(.tag_name != $entry.tag_name)] | [$entry] + .' \
+			"${releases}" >"${releases}.tmp"
+		mv "${releases}.tmp" "${releases}"
+	else
+		printf '[%s]\n' "${entry}" >"${releases}"
+	fi
 }
 publish_all 1.0.0
 publish_codegraph v9.9.9
@@ -1343,5 +1360,227 @@ rg -qF 'malformed agent-ready markers' "${work}/cli-fail.out"
 cmp -s "${work}/cli-fail-before" "${fail_home}/.codex/AGENTS.md"
 [ ! -e "${fail_home}/.local" ]
 [ ! -e "${fail_bins}/agent-ready" ]
+
+# update: resolve the newest eligible release from a file:// stand-in for the
+# releases list, then download, verify, and install it through bootstrap. The
+# releases are the real tree with only VERSION changed, so the updater, the
+# installer, and the migration all run the code they ship with.
+stamp_ago() {
+	local secs=$(( $(date -u +%s) - $1 * 3600 ))
+	date -u -d "@${secs}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
+		date -u -r "${secs}" +%Y-%m-%dT%H:%M:%SZ
+}
+migration_overlay="${work}/migration-overlay"
+mkdir -p "${migration_overlay}/migrations"
+cat >"${migration_overlay}/migrations/v9.9.2-test.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'migrated\n' >"${HOME}/migration-marker"
+EOF
+chmod +x "${migration_overlay}/migrations/v9.9.2-test.sh"
+publish_agent_ready v9.9.0 v9.9.0 "$(stamp_ago 96)"
+publish_agent_ready v9.9.1 v9.9.1 "$(stamp_ago 48)"
+publish_agent_ready v9.9.2 v9.9.2 "$(stamp_ago 0)" "${migration_overlay}"
+# The list holds only the three updatable releases, newest first, so the
+# bootstrap-only v9.9.9 never becomes the target.
+jq -s -c '[.[] | select(.tag_name | test("^v9\\.9\\.[0-2]$"))] | sort_by(.tag_name) | reverse' \
+	"${gh_api}/repos/Dankosik/agent-ready/releases/tags/"v9.9.? \
+	>"${gh_api}/repos/Dankosik/agent-ready/releases.json"
+
+update_home="${work}/update-home"
+update_bins="${work}/update-launcher-bin"
+update_versions="${update_home}/.local/share/agent-ready/versions"
+# base_bin serves the releases list through its curl wrapper but has no jq.
+update_bin="${work}/update-bin"
+mkdir -p "${update_home}" "${update_bins}" "${update_bin}"
+for entry in "${base_bin}"/*; do ln -s "${entry}" "${update_bin}/${entry##*/}"; done
+ln -s "$(command -v jq)" "${update_bin}/jq"
+update_path="${update_bin}:${test_path}"
+run_update() {
+	local home="$1" bins="$2" age="$3"
+	shift 3
+	HOME="${home}" PATH="${update_path}" \
+		XDG_CONFIG_HOME="${home}/.config" \
+		XDG_DATA_HOME="${home}/.local/share" \
+		AGENT_READY_BIN_DIR="${bins}" \
+		CODEX_HOME="${home}/.codex" \
+		AGENT_READY_GITHUB_API="file://${gh_api}" \
+		AGENT_READY_MIN_RELEASE_AGE="${age}" \
+		"${bins}/agent-ready" update "$@"
+}
+
+run_release "${update_home}" "${update_bins}" v9.9.0 "${base_bin}" --agent codex --configure-only \
+	>"${work}/update.out"
+[ "$(readlink "${update_bins}/agent-ready")" = "${update_versions}/v9.9.0/agent-ready" ]
+
+# --check only reports: exit 10 and no change.
+check_status=0
+run_update "${update_home}" "${update_bins}" 0 --check >"${work}/update.out" || check_status=$?
+[ "${check_status}" -eq 10 ]
+rg -qF 'agent-ready v9.9.0 → v9.9.2 available' "${work}/update.out"
+[ "$(readlink "${update_bins}/agent-ready")" = "${update_versions}/v9.9.0/agent-ready" ]
+rg -qx 'version=v9.9.0' "${update_home}/.config/agent-ready/receipt"
+
+run_update "${update_home}" "${update_bins}" 0 >"${work}/update.out"
+rg -qF 'Updating agent-ready v9.9.0 → v9.9.2' "${work}/update.out"
+rg -qF 'Running migration v9.9.2-test.sh' "${work}/update.out"
+rg -qF 'Release notes: https://github.com/Dankosik/agent-ready/releases/tag/v9.9.2' "${work}/update.out"
+rg -qF 'Notes for v9.9.2.' "${work}/update.out"
+rg -qF 'Start a new agent session to load the updated instructions.' "${work}/update.out"
+[ "$(readlink "${update_bins}/agent-ready")" = "${update_versions}/v9.9.2/agent-ready" ]
+rg -qx 'version=v9.9.2' "${update_home}/.config/agent-ready/receipt"
+rg -qx 'agents=codex' "${update_home}/.config/agent-ready/receipt"
+rg -qx 'configured=codex' "${update_home}/.config/agent-ready/receipt"
+rg -q '^<!-- agent-ready v9\.9\.2 sha256:[0-9a-f]{64} -->$' "${update_home}/.codex/AGENTS.md"
+[ -f "${update_home}/migration-marker" ]
+# The receipt's one agent is repeated; every other fake agent on PATH stays out.
+for untouched in \
+	"${update_home}/.claude/CLAUDE.md" \
+	"${update_home}/.gemini/GEMINI.md" \
+	"${update_home}/.copilot/copilot-instructions.md" \
+	"${update_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${update_home}/.grok/rules/agent-ready.md" \
+	"${update_home}/.config/opencode/AGENTS.md" \
+	"${update_home}/.qwen/QWEN.md" \
+	"${update_home}/.cline/data/settings/rules/agent-ready.md" \
+	"${update_home}/.config/kilo/AGENTS.md" \
+	"${update_home}/.config/crush/CRUSH.md" \
+	"${update_home}/.config/goose/AGENTS.md" \
+	"${update_home}/.cursor/hooks.json"; do
+	[ ! -e "${untouched}" ]
+done
+# A configure-only receipt stays configure-only, and nothing upgrades a tool.
+[ ! -e "${update_home}/brew-calls" ]
+if rg -q -- '--upgrade' "${update_home}/rtk-calls"; then
+	printf 'update upgraded a tool without --upgrade-tools\n' >&2
+	exit 1
+fi
+
+# Nothing newer is left, so a second update changes no byte and does not run the
+# migration again.
+rm -f "${update_home}/migration-marker"
+agent_before=$(digest_of "${update_home}/.codex/AGENTS.md")
+receipt_before=$(digest_of "${update_home}/.config/agent-ready/receipt")
+launcher_before=$(readlink "${update_bins}/agent-ready")
+run_update "${update_home}" "${update_bins}" 0 >"${work}/update.out"
+rg -qF 'agent-ready v9.9.2 is up to date' "${work}/update.out"
+[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
+[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
+[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+[ ! -e "${update_home}/migration-marker" ]
+
+# A release younger than the default 24 hours is skipped, so the installed
+# v9.9.1 is the newest eligible release and the update is already current.
+age_home="${work}/update-age-home"
+age_bins="${work}/update-age-bin"
+mkdir -p "${age_home}" "${age_bins}"
+run_release "${age_home}" "${age_bins}" v9.9.1 "${base_bin}" --agent codex --configure-only \
+	>"${work}/min-age.out"
+run_update "${age_home}" "${age_bins}" 24 >>"${work}/min-age.out"
+rg -qF 'agent-ready v9.9.1 is up to date' "${work}/min-age.out"
+[ "$(readlink "${age_bins}/agent-ready")" = \
+	"${age_home}/.local/share/agent-ready/versions/v9.9.1/agent-ready" ]
+
+# An explicit older release is a downgrade, and it is applied.
+run_update "${update_home}" "${update_bins}" 0 v9.9.1 >"${work}/update.out"
+rg -qF 'Downgrading agent-ready v9.9.2 → v9.9.1' "${work}/update.out"
+[ "$(readlink "${update_bins}/agent-ready")" = "${update_versions}/v9.9.1/agent-ready" ]
+rg -qx 'version=v9.9.1' "${update_home}/.config/agent-ready/receipt"
+rg -q '^<!-- agent-ready v9\.9\.1 sha256:[0-9a-f]{64} -->$' "${update_home}/.codex/AGENTS.md"
+
+# --dry-run downloads and reports but installs nothing.
+agent_before=$(digest_of "${update_home}/.codex/AGENTS.md")
+receipt_before=$(digest_of "${update_home}/.config/agent-ready/receipt")
+launcher_before=$(readlink "${update_bins}/agent-ready")
+versions_before=$(find "${update_versions}" -mindepth 1 -maxdepth 1 -type d | sort | tr '\n' ' ')
+run_update "${update_home}" "${update_bins}" 0 --dry-run >"${work}/dry-run.out"
+rg -qF 'Updating agent-ready v9.9.1 → v9.9.2' "${work}/dry-run.out"
+rg -q '^Codex: would refresh ' "${work}/dry-run.out"
+[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
+[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
+[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+[ "$(find "${update_versions}" -mindepth 1 -maxdepth 1 -type d | sort | tr '\n' ' ')" = "${versions_before}" ]
+
+# A stale lock refuses the run before anything is resolved or changed.
+mkdir "${update_home}/.config/agent-ready/update.lock"
+lock_status=0
+run_update "${update_home}" "${update_bins}" 0 >"${work}/lock.out" 2>&1 || lock_status=$?
+[ "${lock_status}" -eq 1 ]
+rg -qF "another agent-ready update is running (remove ${update_home}/.config/agent-ready/update.lock if it is stale)" \
+	"${work}/lock.out"
+[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
+[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
+[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+rmdir "${update_home}/.config/agent-ready/update.lock"
+
+# A digest mismatch on the target stops the update with nothing replaced.
+cp "${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.2" "${work}/v9.9.2-tag.json"
+jq --arg name "agent-ready-v9.9.2.tar.gz" \
+	'(.assets[] | select(.name == $name) | .digest) = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
+	"${work}/v9.9.2-tag.json" >"${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.2"
+digest_status=0
+run_update "${update_home}" "${update_bins}" 0 >"${work}/digest.out" 2>&1 || digest_status=$?
+[ "${digest_status}" -eq 1 ]
+rg -qF 'checksum mismatch for agent-ready-v9.9.2.tar.gz; nothing installed' "${work}/digest.out"
+[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
+[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
+[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+cp "${work}/v9.9.2-tag.json" "${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.2"
+
+# Without a receipt (v1.2.x or earlier) the tool mode is read from the machine
+# and the agents are auto-detected again, and the update says so.
+legacy_home="${work}/update-legacy-home"
+legacy_bins="${work}/update-legacy-bin"
+mkdir -p "${legacy_home}" "${legacy_bins}"
+run_release "${legacy_home}" "${legacy_bins}" v9.9.0 "${base_bin}" --agent codex --configure-only \
+	>/dev/null
+rm "${legacy_home}/.config/agent-ready/receipt"
+run_update "${legacy_home}" "${legacy_bins}" 0 >"${work}/legacy.out"
+rg -qF 'No receipt: assuming agents=auto and tools=brew' "${work}/legacy.out"
+rg -qF 'Updating agent-ready none → v9.9.2' "${work}/legacy.out"
+rg -qx 'version=v9.9.2' "${legacy_home}/.config/agent-ready/receipt"
+rg -qx 'agents=auto' "${legacy_home}/.config/agent-ready/receipt"
+rg -q '^<!-- agent-ready v9\.9\.2 ' "${legacy_home}/.claude/CLAUDE.md"
+[ "$(readlink "${legacy_bins}/agent-ready")" = \
+	"${legacy_home}/.local/share/agent-ready/versions/v9.9.2/agent-ready" ]
+
+# The documented `curl … | AGENT_READY_REF=… bash -s -- update` path: a
+# standalone bootstrap downloads the pinned tree and runs its update, which then
+# installs the newest release and moves the launcher there.
+bootstrap_home="${work}/update-bootstrap-home"
+bootstrap_bins="${work}/update-bootstrap-bin"
+mkdir -p "${bootstrap_home}" "${bootstrap_bins}"
+HOME="${bootstrap_home}" PATH="${update_path}" \
+	XDG_CONFIG_HOME="${bootstrap_home}/.config" \
+	XDG_DATA_HOME="${bootstrap_home}/.local/share" \
+	AGENT_READY_BIN_DIR="${bootstrap_bins}" \
+	CODEX_HOME="${bootstrap_home}/.codex" \
+	AGENT_READY_REF=v9.9.1 AGENT_READY_GITHUB_API="file://${gh_api}" \
+	AGENT_READY_MIN_RELEASE_AGE=0 \
+	bash "${bootstrap_copy}/bootstrap.sh" update </dev/null >"${work}/bootstrap-update.out"
+rg -qF 'Updating agent-ready none → v9.9.2' "${work}/bootstrap-update.out"
+rg -qx 'version=v9.9.2' "${bootstrap_home}/.config/agent-ready/receipt"
+[ "$(readlink "${bootstrap_bins}/agent-ready")" = \
+	"${bootstrap_home}/.local/share/agent-ready/versions/v9.9.2/agent-ready" ]
+
+# The language step repeats the language's own installer, but must not let its
+# automatic mode re-detect agents: a Go receipt with one explicit agent stays
+# one agent, and that agent's block carries the Go routing.
+lang_home="${work}/update-language-home"
+lang_bins="${work}/update-language-bin"
+mkdir -p "${lang_home}/.config/agent-ready/languages" "${lang_bins}"
+printf 'enabled\n' >"${lang_home}/.config/agent-ready/languages/go"
+run_release "${lang_home}" "${lang_bins}" v9.9.0 "${base_bin}" --agent codex --configure-only \
+	>"${work}/language.out"
+rg -qx 'languages=go' "${lang_home}/.config/agent-ready/receipt"
+run_update "${lang_home}" "${lang_bins}" 0 >>"${work}/language.out"
+rg -qF 'Codex: kept existing gopls MCP' "${work}/language.out"
+rg -qx 'version=v9.9.2' "${lang_home}/.config/agent-ready/receipt"
+rg -qx 'agents=codex' "${lang_home}/.config/agent-ready/receipt"
+rg -qx 'languages=go' "${lang_home}/.config/agent-ready/receipt"
+rg -q '^<!-- agent-ready v9\.9\.2 sha256:[0-9a-f]{64} -->$' "${lang_home}/.codex/AGENTS.md"
+rg -qF 'Use `go_workspace` only when the module/workspace layout is unclear' \
+	"${lang_home}/.codex/AGENTS.md"
+[ ! -e "${lang_home}/.claude/CLAUDE.md" ]
+[ ! -e "${lang_home}/.gemini/GEMINI.md" ]
 
 printf 'installer routing checks passed\n'

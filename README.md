@@ -305,6 +305,36 @@ To explicitly upgrade the generic tools:
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.2.1/bootstrap.sh | AGENT_READY_REF=v1.2.1 bash -s -- --upgrade
 ```
 
+## Update
+
+`agent-ready update` moves the installed command and the configuration it
+manages to the newest release, repeating the install recorded in the receipt:
+
+```bash
+agent-ready update           # newest release that is at least 24 hours old
+agent-ready update --check   # only report; exits 10 when an update is available
+agent-ready update vX.Y.Z    # an explicit release, including a downgrade
+```
+
+It repeats the receipt's agents, languages, and tool mode, so an agent you did
+not select is never configured and a configure-only install stays
+configure-only. Tools are not upgraded unless you pass `--upgrade-tools`.
+`--dry-run` runs the new release's installer in dry-run mode and writes
+nothing, and `--force` is passed through for a block whose local edits would
+otherwise stop the update.
+
+A release is only offered once its archive has been published for 24 hours, so
+a broken release can be withdrawn before anyone updates to it; set
+`AGENT_READY_MIN_RELEASE_AGE` to a number of hours to change that, or to `0` to
+take the newest release immediately. The archive is verified against the
+SHA-256 digest GitHub records before anything inside it runs. An install from
+v1.2.x or earlier has no receipt; `update` then assumes automatic agent
+detection and reads the tool mode from the machine, and says so.
+
+After the update, start a new agent session to load the updated instructions.
+`agent-ready rollback` returns to the previous release when the update is not
+what you wanted.
+
 ## The `agent-ready` command
 
 Installing from a release also leaves a local `agent-ready` command, laid out

@@ -7,7 +7,10 @@ cleanup() { [ -z "${work}" ] || rm -rf "${work}"; }
 trap cleanup EXIT
 
 # A checkout is a bootstrap.sh with install.sh beside it. Anything else,
-# including a lone copy, is the documented `curl | bash` download path.
+# including a lone copy, is the documented `curl | bash` download path. A
+# pinned ref asks for that release even from a checkout, so the update path
+# downloads what it is about to install instead of rerunning the tree it
+# replaces; without a ref, a checkout serves its own tree.
 checkout=
 verified=0
 source_path="${BASH_SOURCE[0]:-}"
@@ -17,6 +20,7 @@ if [ -n "${source_path}" ] && [ -f "${source_path}" ]; then
 		checkout="${source_dir}"
 	fi
 fi
+[ -z "${checkout}" ] || [ -z "${AGENT_READY_REF:-}" ] || checkout=
 
 if [ -n "${checkout}" ]; then
 	root="${checkout}"
@@ -145,9 +149,13 @@ fi
 
 # The dispatch lives in agent-ready. A verified release tree also installs that
 # command itself; a checkout, a dev ref, or an unverified archive only runs the
-# requested install.
+# requested install. `update` resolves and applies its own verified release, so
+# it never self-installs the tree it was started from.
+self_install=
 if [ "${verified}" -eq 1 ]; then
-	bash "${root}/agent-ready" --self-install "$@"
-else
-	bash "${root}/agent-ready" "$@"
+	case "${1:-}" in
+	update) ;;
+	*) self_install=--self-install ;;
+	esac
 fi
+bash "${root}/agent-ready" ${self_install:+"${self_install}"} "$@"

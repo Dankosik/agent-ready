@@ -41,6 +41,10 @@ for people who run its installers against real machines and real agent configs.
   config, or write outside the documented config paths.
 - Preserve existing content, validate before replacing, use same-directory
   temporary files plus atomic moves, and fail closed on malformed input.
+- `agent-ready update` repeats the receipt's agents, languages, and tool mode,
+  and never adds agents the user did not select. Tools are upgraded only with
+  `--upgrade-tools`, and an update downloads and verifies the target release
+  through `bootstrap.sh` rather than reusing the tree it replaces.
 - Installer tests must use an isolated temporary `HOME` and fake executables.
   Never run a development test against real agent configuration.
 - Keep repeated installation idempotent. Every new mutation path needs the
