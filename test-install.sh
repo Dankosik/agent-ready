@@ -145,6 +145,11 @@ graph_line=$(rg '^- Code graph:' "${fake_home}/.copilot/copilot-instructions.md"
 	printf 'CodeGraph routing line is %s characters; keep it under 400\n' "${#graph_line}" >&2
 	exit 1
 }
+# `build | tail` exits 0 on failure, and a missing edit target changes nothing silently.
+rg -qF "don't pipe them into \`tail\`/\`head\`; the pipe exits 0" "${fake_home}/.codex/AGENTS.md"
+rg -qF '`set -o pipefail` first' "${fake_home}/.codex/AGENTS.md"
+rg -qF 'use your file-edit tool, which fails when the text is missing' "${fake_home}/.codex/AGENTS.md"
+rg -qF '`str.replace` and `sd` silently change nothing' "${fake_home}/.codex/AGENTS.md"
 # rtk renamed `proxy` to `bypass`, and sd treats its pattern as a regex unless -F.
 rg -qF '`rtk bypass <cmd>`' "${fake_home}/.codex/AGENTS.md"
 rg -qF '`sd -F ' "${fake_home}/.codex/AGENTS.md"

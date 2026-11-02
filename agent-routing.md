@@ -1,5 +1,7 @@
 Tool routing (use instead of defaults):
 - Shell: prefix commands with `rtk`; `rtk bypass <cmd>` for unfiltered output.
+- Builds/tests: don't pipe them into `tail`/`head`; the pipe exits 0 and cuts the failure. rtk already condenses cargo/go/pytest/vitest/tsc output; if you must trim, `set -o pipefail` first.
+- Literal multi-line edits: use your file-edit tool, which fails when the text is missing; a script's `str.replace` and `sd` silently change nothing, so check the match count.
 - Search: `rg` text, `rg --files` files; code structure (calls, declarations, loops, branches): `ast-grep run -l <lang> -p '<pattern>'` (`$X` matches any node; add `-r '<new>' -U` to rewrite), even where a regex fits.
 - Edit: `sd -F 'old' 'new' <file>` (literal, in place; drop `-F` for regex); temporary Python deps: `uv run --with <pkg>`.
 - Data: `jq` JSON, `yq` YAML/TOML/XML (`yq -i` edits these and JSON in place), `gh api --jq` GitHub.
