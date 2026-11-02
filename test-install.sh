@@ -159,6 +159,9 @@ rg -qF "\`-r '<new>' -U\` to rewrite" "${fake_home}/.codex/AGENTS.md"
 rg -qF 'one section of a long Markdown file' "${fake_home}/.codex/AGENTS.md"
 rg -qF 'when formatting noise may hide a logic change' "${fake_home}/.codex/AGENTS.md"
 rg -qF 'to compare commands, `hyperfine' "${fake_home}/.codex/AGENTS.md"
+# jq cannot edit in place, so agents rewrote JSON through Python; yq -i can.
+rg -qF '`yq -i` edits these and JSON in place' "${fake_home}/.codex/AGENTS.md"
+rg -qF '`osv-scanner scan source -r .` vulnerable dependencies' "${fake_home}/.codex/AGENTS.md"
 if rg -qF 'rtk proxy' "${fake_home}/.codex/AGENTS.md"; then
 	printf 'routing still names the deprecated rtk proxy\n' >&2
 	exit 1
@@ -470,6 +473,8 @@ publish_all() {
 	publish yshavit/mdq "v${v}" mdq mdq-linux-x64-musl.tar.gz mdq-linux-x64.tar.gz
 	publish sharkdp/hyperfine "v${v}" hyperfine "hyperfine-v${v}-x86_64-unknown-linux-musl.tar.gz" \
 		"hyperfine-v${v}-aarch64-unknown-linux-musl.tar.gz"
+	publish google/osv-scanner "v${v}" osv-scanner osv-scanner_linux_amd64 osv-scanner_linux_arm64 \
+		osv-scanner_darwin_arm64
 }
 # publish_codegraph <tag> — one release with the four platform bundles, each a
 # codegraph-<os>-<arch>/bin/codegraph exactly like the upstream archive.
@@ -534,14 +539,14 @@ run_binaries() {
 }
 bins="${binary_home}/.local/bin"
 state="${binary_home}/.config/agent-ready/binaries"
-expected_bins="jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine codegraph"
+expected_bins="jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine osv-scanner codegraph"
 
 run_binaries >"${work}/binaries.out"
 for bin in ${expected_bins}; do
 	[ -x "${bins}/${bin}" ] || { printf 'binary install did not provide %s\n' "${bin}" >&2; exit 1; }
 done
 [ ! -e "${bins}/sg" ] || { printf 'ast-grep installed sg, which shadows shadow-utils sg\n' >&2; exit 1; }
-[ "$(wc -l <"${state}" | tr -d ' ')" -eq 15 ]
+[ "$(wc -l <"${state}" | tr -d ' ')" -eq 16 ]
 rg -qx 'ripgrep 1.0.0' "${state}"
 rg -qF 'jq jq-1.0.0 installed' "${work}/binaries.out"
 rg -qF 'codegraph v9.9.9 installed' "${work}/binaries.out"
@@ -557,14 +562,14 @@ rg -qF 'is not on PATH' "${work}/binaries.out"
 mv "${gh_api}" "${gh_api}.offline"
 run_binaries >"${work}/binaries.out"
 mv "${gh_api}.offline" "${gh_api}"
-[ "$(rg -c 'already installed$' "${work}/binaries.out")" -eq 16 ]
+[ "$(rg -c 'already installed$' "${work}/binaries.out")" -eq 17 ]
 
 # --upgrade downloads only what changed upstream.
 publish BurntSushi/ripgrep 2.0.0 rg ripgrep-2.0.0-x86_64-unknown-linux-musl.tar.gz
 run_binaries --upgrade >"${work}/binaries.out"
 rg -qF 'ripgrep 2.0.0 installed' "${work}/binaries.out"
 rg -qF 'codegraph v9.9.9 is up to date' "${work}/binaries.out"
-[ "$(rg -c 'is up to date$' "${work}/binaries.out")" -eq 15 ]
+[ "$(rg -c 'is up to date$' "${work}/binaries.out")" -eq 16 ]
 rg -qx 'ripgrep 2.0.0' "${state}"
 
 # A latest release missing this platform's asset falls back to the newest
@@ -636,6 +641,33 @@ if HOME="${brew_home}" PATH="${test_path}" "${root}/install.sh" --configure-only
 	printf -- '--configure-only --binaries unexpectedly succeeded\n' >&2
 	exit 1
 fi
+
+# macOS: coreutils installs `gtimeout`; `timeout` is linked only where none exists.
+mac_home="${work}/brew-mac-home"
+mac_bin="${work}/mac-bin"
+mkdir -p "${mac_home}" "${mac_bin}"
+printf '#!/bin/sh\nexit 0\n' >"${mac_bin}/gtimeout"
+chmod +x "${mac_bin}/gtimeout"
+run_mac() {
+	HOME="${mac_home}" PATH="${mac_bin}:${fake_bin}:${base_bin}" XDG_CONFIG_HOME="${mac_home}/.config" \
+		CODEX_HOME="${mac_home}/.codex" AGENT_READY_OS=Darwin \
+		"${root}/install.sh" --agent codex
+}
+run_mac >"${work}/mac.out"
+rg -qF 'timeout: linked' "${work}/mac.out"
+[ "$(readlink "${mac_home}/.local/bin/timeout")" = "${mac_bin}/gtimeout" ]
+run_mac >"${work}/mac.out"
+rg -qx 'timeout already linked' "${work}/mac.out"
+# A file the user put there is kept, and a `timeout` already on PATH needs no link.
+rm "${mac_home}/.local/bin/timeout"
+printf 'mine\n' >"${mac_home}/.local/bin/timeout"
+run_mac >"${work}/mac.out"
+rg -qF 'timeout: keeping the existing' "${work}/mac.out"
+rg -qx 'mine' "${mac_home}/.local/bin/timeout"
+rm "${mac_home}/.local/bin/timeout"
+cp "${mac_bin}/gtimeout" "${mac_bin}/timeout"
+run_mac >"${work}/mac.out"
+[ ! -e "${mac_home}/.local/bin/timeout" ]
 
 # Go on Linux without Homebrew builds gopls with the user's toolchain.
 go_home="${work}/go-linux-home"

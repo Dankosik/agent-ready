@@ -394,6 +394,52 @@ check_gitleaks() {
 	finish
 }
 
+# --------------------------------------------------------- osv-scanner
+check_osv_scanner() {
+	have osv-scanner || return 0
+	start osv-scanner "a Go service pins golang.org/x/text v0.3.0; it builds and its tests pass"
+	local app="${work}/osv-app" clean="${work}/osv-clean" found rc=0 ids
+	mkdir -p "${app}" "${clean}"
+	printf 'module example.com/app\n\ngo 1.22\n\nrequire golang.org/x/text v0.3.0\n' >"${app}/go.mod"
+	printf 'module example.com/app\n\ngo 1.22\n' >"${clean}/go.mod"
+
+	found=$( (grep -ril 'cve\|vulnerab\|advisory' "${app}" || true) | lines)
+	osv-scanner scan source --format json -r "${app}" >"${work}/osv.json" 2>/dev/null || rc=$?
+	if [ "${rc}" -gt 1 ]; then
+		row "skipped" "the OSV API is unreachable (exit ${rc})"
+		skip=$((skip + 1))
+		return 0
+	fi
+	ids=$(jq -r '[.results[].packages[].vulnerabilities[].id | select(startswith("GO-"))] | sort | join(" ")' "${work}/osv.json")
+	row "without" "no file in the repository mentions an advisory → ${found} files"
+	row "with" "osv-scanner scan source → exit ${rc}: ${ids:-nothing}"
+	claim "the repository itself gives no warning" test "${found}" -eq 0
+	claim "osv-scanner failed the vulnerable pin" test "${rc}" -eq 1
+	claim "GO-2020-0015 was reported" grep -q 'GO-2020-0015' <<<"${ids}"
+	claim "a module without dependencies passes" osv-scanner scan source -r "${clean}"
+	row "verdict" "the pin compiles and passes its tests; only the advisory database knows it is unsafe"
+	finish
+}
+
+# ------------------------------------------------------------- timeout
+check_timeout() {
+	have timeout || return 0
+	start timeout "a test hangs on a network call; the agent's turn must not hang with it"
+	local t0 without with rc=0
+	t0=$(date +%s)
+	sleep 3
+	without=$(($(date +%s) - t0))
+	t0=$(date +%s)
+	timeout 1 sleep 3 || rc=$?
+	with=$(($(date +%s) - t0))
+	row "without" "sleep 3 with no limit → returned after ${without} s"
+	row "with" "timeout 1 sleep 3 → exit ${rc} after ${with} s"
+	claim "timeout stopped the command with exit 124" test "${rc}" -eq 124
+	claim "timeout returned before the command would have" test "${with}" -lt "${without}"
+	row "verdict" "a bounded wait fails fast and says so; an unbounded one spends the whole turn"
+	finish
+}
+
 # ---------------------------------------------------------- actionlint
 check_actionlint() {
 	have actionlint || return 0
@@ -694,6 +740,7 @@ check_gh
 check_worktrunk
 check_jq
 check_gitleaks
+check_osv_scanner
 check_actionlint
 check_shellcheck
 check_difftastic
@@ -701,6 +748,7 @@ check_yq
 check_mdq
 check_codegraph
 check_hyperfine
+check_timeout
 
 printf '\n%s\n' "$(printf '%.0s─' $(seq 1 64))"
 printf '%d held, %d failed, %d skipped.\n' "${pass}" "${fail}" "${skip}"
