@@ -79,3 +79,13 @@ brew "mdq"
 # Statistical command-line benchmarking.
 # "It got faster" without a measurement is a claim, not a result.
 brew "hyperfine"
+
+# Dependency vulnerability scanner over lockfiles, for every ecosystem at once.
+# A vulnerable pin builds and passes tests; nothing in the repository says so.
+brew "osv-scanner"
+
+# GNU coreutils, for `timeout` on macOS (installed as `gtimeout`).
+# Agents wrap slow commands in `timeout` by reflex; without it the call fails
+# with "command not found" and the agent improvises with `perl -e alarm`.
+# Linux already ships it, and Homebrew's unprefixed copy would shadow the system.
+brew "coreutils" if OS.mac?

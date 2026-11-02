@@ -6,7 +6,7 @@
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
   <img alt="platform macOS and Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey">
   <a href="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml/badge.svg"></a>
-  <img alt="16 generic tools" src="https://img.shields.io/badge/generic_tools-16-brightgreen">
+  <img alt="17 generic tools" src="https://img.shields.io/badge/generic_tools-17-brightgreen">
 </p>
 
 <p align="center">
@@ -43,9 +43,13 @@ sudo apt-get install -y curl ca-certificates xz-utils unzip
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.2.1/bootstrap.sh | AGENT_READY_REF=v1.2.1 bash
 ```
 
-That's it. The installer adds 16 language-independent tools and configures
+That's it. The installer adds 17 language-independent tools and configures
 Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI, and Windsurf when it
 finds them. Start a new agent session after the command finishes.
+
+On macOS it also installs GNU coreutils, because agents call `timeout` by reflex
+and macOS has none. If no `timeout` is on your `PATH`, the installer links
+`~/.local/bin/timeout` to `gtimeout`; it never replaces a file already there.
 
 The command is pinned to the immutable `v1.2.1` release. Upgrade by choosing a
 newer release version in both places in the command.
@@ -211,7 +215,8 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.2.1/bootstr
 | Search and edit | [`ripgrep`](https://github.com/BurntSushi/ripgrep), [`ast-grep`](https://ast-grep.github.io/), [`sd`](https://github.com/chmln/sd) |
 | Python and data | [`uv`](https://docs.astral.sh/uv/), [`jq`](https://jqlang.org/), [`yq`](https://mikefarah.gitbook.io/yq/), [`mdq`](https://github.com/yshavit/mdq) |
 | Git and GitHub | [`gh`](https://cli.github.com/), [`worktrunk`](https://worktrunk.dev/), [`difftastic`](https://difftastic.wilfred.me.uk/) |
-| Local checks | [`gitleaks`](https://github.com/gitleaks/gitleaks), [`actionlint`](https://github.com/rhysd/actionlint), [`shellcheck`](https://www.shellcheck.net/), [`hyperfine`](https://github.com/sharkdp/hyperfine) |
+| Local checks | [`gitleaks`](https://github.com/gitleaks/gitleaks), [`osv-scanner`](https://google.github.io/osv-scanner/), [`actionlint`](https://github.com/rhysd/actionlint), [`shellcheck`](https://www.shellcheck.net/), [`hyperfine`](https://github.com/sharkdp/hyperfine) |
+| Command time limits (macOS) | [`coreutils`](https://www.gnu.org/software/coreutils/) (`timeout`) |
 
 The generic installer and language installers are separate. Adding Go support
 does not change the base tool list.
