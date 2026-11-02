@@ -80,6 +80,23 @@ elif [ "${install_tools}" -eq 1 ]; then
 	else
 		brew bundle --no-upgrade --file "${root}/Brewfile"
 	fi
+	# macOS ships no `timeout`, and agents call it by reflex. coreutils installs it
+	# as `gtimeout`; link only that one name, and never over an existing file.
+	if [ "${os}" = Darwin ] && ! command -v timeout >/dev/null 2>&1; then
+		gtimeout=$(command -v gtimeout || true)
+		timeout_link="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}/timeout"
+		if [ -z "${gtimeout}" ]; then
+			printf 'timeout: gtimeout not found; skipped\n' >&2
+		elif [ -L "${timeout_link}" ] && [ "$(readlink "${timeout_link}")" = "${gtimeout}" ]; then
+			printf 'timeout already linked\n'
+		elif [ -e "${timeout_link}" ] || [ -L "${timeout_link}" ]; then
+			printf 'timeout: keeping the existing %s\n' "${timeout_link}"
+		else
+			mkdir -p "$(dirname -- "${timeout_link}")"
+			ln -s "${gtimeout}" "${timeout_link}"
+			printf 'timeout: linked %s to %s\n' "${timeout_link}" "${gtimeout}"
+		fi
+	fi
 fi
 
 # CodeGraph publishes no Homebrew formula and ships one self-contained bundle per
