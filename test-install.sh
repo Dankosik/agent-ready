@@ -461,6 +461,19 @@ for command in bash sh env curl tar gzip xz unzip python3 sha256sum shasum awk s
 	path=$(command -v "${command}" || true)
 	[ -z "${path}" ] || ln -s "${path}" "${base_bin}/${command}"
 done
+# curl drops the query string of a file:// URL, and the stand-in already has a
+# releases/ directory, so the release list is served from releases.json.
+rm "${base_bin}/curl"
+cat >"${base_bin}/curl" <<EOF
+#!/usr/bin/env bash
+args=()
+for arg in "\$@"; do
+	case "\${arg}" in */releases\?per_page=30) arg="\${arg%\?per_page=30}.json" ;; esac
+	args+=("\${arg}")
+done
+exec $(command -v curl) "\${args[@]}"
+EOF
+chmod +x "${base_bin}/curl"
 for command in claude codex; do cp "${fake_bin}/${command}" "${base_bin}/"; done
 
 binary_home="${work}/binary-home"
@@ -507,6 +520,30 @@ rg -qF 'ripgrep 2.0.0 installed' "${work}/binaries.out"
 rg -qF 'codegraph v9.9.9 is up to date' "${work}/binaries.out"
 [ "$(rg -c 'is up to date$' "${work}/binaries.out")" -eq 15 ]
 rg -qx 'ripgrep 2.0.0' "${state}"
+
+# A latest release missing this platform's asset falls back to the newest
+# stable release that has it; prereleases are skipped.
+ag="${gh_api}/repos/ast-grep/ast-grep/releases"
+cp "${ag}/latest" "${work}/ast-grep.json"
+jq -s '[(.[0] | .tag_name = "3.0.0-rc" | .prerelease = true),
+	{tag_name: "2.0.0", assets: []},
+	.[0]]' "${work}/ast-grep.json" >"${ag}.json"
+jq -n '{tag_name: "2.0.0", assets: []}' >"${ag}/latest"
+rm "${bins}/ast-grep"
+run_binaries >"${work}/binaries.out" 2>&1
+rg -qF 'ast-grep: latest release 2.0.0 has no Linux x86_64 asset; using 1.0.0' "${work}/binaries.out"
+rg -qF 'ast-grep 1.0.0 installed' "${work}/binaries.out"
+[ -x "${bins}/ast-grep" ]
+jq -n '[{tag_name: "2.0.0", assets: []}]' >"${ag}.json"
+rm "${bins}/ast-grep"
+if run_binaries >"${work}/binaries.out" 2>&1; then
+	printf 'install without any matching release unexpectedly succeeded\n' >&2
+	exit 1
+fi
+rg -qF 'ast-grep: no recent ast-grep/ast-grep release publishes a Linux x86_64 asset' "${work}/binaries.out"
+cp "${work}/ast-grep.json" "${ag}/latest"
+rm "${ag}.json"
+run_binaries >/dev/null
 
 # A digest mismatch installs nothing and fails.
 jq '.assets[0].digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
