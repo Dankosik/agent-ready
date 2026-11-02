@@ -171,7 +171,7 @@ bootstrap_jq() {
 
 install_tool() {
 	local name="$1" repo="$2" bins="$3" regex="$4"
-	local json="${work}/${name}.json" tag asset asset_name url digest file dir bin found
+	local json="${work}/${name}.json" tag latest asset asset_name url digest file dir bin found
 	if [ "${regex}" = - ]; then
 		printf '%s: no Linux %s build is published upstream; skipped\n' "${name}" "${arch}" >&2
 		return 0
@@ -187,6 +187,21 @@ install_tool() {
 	fi
 
 	fetch "${api}/repos/${repo}/releases/latest" "${json}"
+	# A release whose upstream build failed can be published without every
+	# platform's asset; take the newest stable release that has this one.
+	# shellcheck disable=SC2016 # $re is a jq variable
+	if "${jq_bin}" -e --arg re "${regex}" '[.assets[] | select(.name | test($re))] | length == 0' \
+		"${json}" >/dev/null; then
+		latest=$("${jq_bin}" -r '.tag_name // empty' "${json}")
+		fetch "${api}/repos/${repo}/releases?per_page=30" "${work}/${name}.list.json"
+		# shellcheck disable=SC2016 # $re is a jq variable
+		"${jq_bin}" --arg re "${regex}" 'first(.[] | select((.draft or .prerelease) | not)
+			| select([.assets[] | select(.name | test($re))] | length == 1))' \
+			"${work}/${name}.list.json" >"${json}"
+		[ -s "${json}" ] || die "${name}: no recent ${repo} release publishes a Linux ${arch} asset"
+		printf '%s: latest release %s has no Linux %s asset; using %s\n' \
+			"${name}" "${latest}" "${arch}" "$("${jq_bin}" -r '.tag_name' "${json}")" >&2
+	fi
 	tag=$("${jq_bin}" -r '.tag_name // empty' "${json}")
 	[ -n "${tag}" ] || die "${name}: no release found for ${repo}"
 	if [ "${upgrade}" -eq 1 ] && [ "$(recorded_tag "${name}")" = "${tag}" ] && have_all "${bins}"; then
