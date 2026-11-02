@@ -1,7 +1,10 @@
 name: CI
 
 on:
+  # A branch is checked by its pull_request run; a push run there would only
+  # queue a second macOS job for the same commit.
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
   # The tools are installed at their latest versions, so a daily run catches an
