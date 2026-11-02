@@ -4,7 +4,8 @@ Tool routing (use instead of defaults):
 - Edit: `sd -F 'old' 'new' <file>` (literal, in place; drop `-F` for regex); temporary Python deps: `uv run --with <pkg>`.
 - Data: `jq` JSON, `yq` YAML/TOML/XML, `gh api --jq` GitHub.
 - Worktrees: `wt list` first, then Worktrunk (`wt switch -c <branch>`); `wt <cmd> --help` before mutating.
-- Read: `mdq '# <heading>' <file>` Markdown sections; `git -c diff.external='difft --display inline' diff` code diffs, without `rtk`.
+- Read: `mdq '# <heading>' <file>` to read one section of a long Markdown file instead of all of it.
+- Diffs: when formatting noise may hide a logic change, `git -c diff.external='difft --display inline' diff` (without `rtk`).
 - Check: `shellcheck` shell, `actionlint` workflows, `gitleaks dir|git --redact .` files|history.
-- Timing: `hyperfine --warmup 3`.
+- Timing: to compare commands, `hyperfine --warmup 3 '<a>' '<b>'`, not single `time` runs.
 - Code graph: index of symbols, calls, imports. With `.codegraph/`, first ask `codegraph_explore` (MCP) or `codegraph explore "<question>"` how code works, who calls what, what a change affects; its source is current, so do not re-read it, but a file marked changed since sync may have stale callers (`codegraph sync`). No index: normal routing; never `codegraph init` unasked.
