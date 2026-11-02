@@ -337,6 +337,11 @@ if run_tool_install --configure-only --upgrade >/dev/null 2>&1; then
 	exit 1
 fi
 
+# A checkout bootstrap only runs the installer; the local command comes from a
+# verified release.
+[ ! -e "${fake_home}/.local/share/agent-ready/versions" ]
+[ ! -e "${fake_home}/.local/bin/agent-ready" ]
+
 # The receipt records what this run configured so a later update can repeat it.
 receipt="${fake_home}/.config/agent-ready/receipt"
 rg -qx 'schema=1' "${receipt}"
@@ -351,7 +356,8 @@ targeted_home="${work}/targeted-home"
 archive_root="${work}/archive/agent-ready-test"
 archive="${work}/agent-ready-test.tar.gz"
 mkdir -p "${targeted_home}" "${archive_root}/lib"
-cp "${root}/Brewfile" "${root}/agent-routing.md" "${root}/install.sh" "${root}/VERSION" "${archive_root}/"
+cp "${root}/Brewfile" "${root}/agent-routing.md" "${root}/install.sh" "${root}/VERSION" \
+	"${root}/agent-ready" "${archive_root}/"
 cp "${root}/lib/receipt.sh" "${archive_root}/lib/"
 tar -czf "${archive}" -C "${work}/archive" agent-ready-test
 HOME="${targeted_home}" PATH="${test_path}" \
@@ -790,8 +796,9 @@ EOF
 			--arg url "file://${dir}/${name}" '{name: $name, digest: $digest, browser_download_url: $url}'
 	done | jq -s --arg tag "${tag}" '{tag_name: $tag, assets: .}' >"${gh_api}/repos/colbymchenry/codegraph/releases/latest"
 }
-# publish_agent_ready <tag> [version] — one release with the archive the
-# release-asset workflow attaches, holding what bootstrap.sh needs.
+# publish_agent_ready <tag> [version] — the release archive the release-asset
+# workflow attaches, built from this working tree with the tag's VERSION. The
+# archive therefore holds the real installer and the real agent-ready command.
 publish_agent_ready() {
 	local tag="$1" version="${2:-$1}" name dir stage
 	name="agent-ready-${tag}"
@@ -799,9 +806,8 @@ publish_agent_ready() {
 	stage="${work}/agent-ready-stage/${tag}"
 	rm -rf "${stage}"
 	mkdir -p "${stage}/${name}" "${dir}" "${gh_api}/repos/Dankosik/agent-ready/releases/tags"
-	# shellcheck disable=SC2016 # $* and $HOME belong to the generated script
-	printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"${HOME}/bootstrap-calls"\n' >"${stage}/${name}/install.sh"
-	chmod +x "${stage}/${name}/install.sh"
+	cp -R "${root}/." "${stage}/${name}/"
+	rm -rf "${stage}/${name}/.git" "${stage}/${name}/.codegraph"
 	printf '%s\n' "${version}" >"${stage}/${name}/VERSION"
 	tar -czf "${dir}/${name}.tar.gz" -C "${stage}" "${name}"
 	jq -n --arg name "${name}.tar.gz" --arg digest "sha256:$(digest_of "${dir}/${name}.tar.gz")" \
@@ -833,7 +839,7 @@ done
 exec $(command -v curl) "\${args[@]}"
 EOF
 chmod +x "${base_bin}/curl"
-for command in claude codex; do cp "${fake_bin}/${command}" "${base_bin}/"; done
+for command in claude codex rtk; do cp "${fake_bin}/${command}" "${base_bin}/"; done
 
 binary_home="${work}/binary-home"
 mkdir -p "${binary_home}"
@@ -1046,23 +1052,32 @@ cp "${root}/bootstrap.sh" "${bootstrap_copy}/bootstrap.sh"
 publish_agent_ready v9.9.9
 run_bootstrap() {
 	HOME="$1" PATH="$2" XDG_CONFIG_HOME="$1/.config" \
+		XDG_DATA_HOME="$1/.local/share" \
 		AGENT_READY_REF=v9.9.9 AGENT_READY_GITHUB_API="file://${gh_api}" \
 		bash "${bootstrap_copy}/bootstrap.sh" codex --configure-only </dev/null
 }
 
 verified_home="${work}/verified-home"
+verified_bins="${verified_home}/.local/bin"
+verified_versions="${verified_home}/.local/share/agent-ready/versions"
 mkdir -p "${verified_home}"
 run_bootstrap "${verified_home}" "${test_path}" >"${work}/bootstrap.out"
 rg -qF 'Downloading agent-ready v9.9.9' "${work}/bootstrap.out"
-rg -qxF -- '--agent codex --configure-only' "${verified_home}/bootstrap-calls"
+[ -L "${verified_bins}/agent-ready" ]
+[ "$(readlink "${verified_bins}/agent-ready")" = "${verified_versions}/v9.9.9/agent-ready" ]
+rg -qF "agent-ready v9.9.9 installed in ${verified_versions}/v9.9.9" "${work}/bootstrap.out"
+rg -qx 'version=v9.9.9' "${verified_home}/.config/agent-ready/receipt"
+rg -q '^Tool routing \(use instead of defaults\):$' "${verified_home}/.codex/AGENTS.md"
 
 # The same release without jq, as on a fresh Linux.
 no_jq_home="${work}/no-jq-bootstrap-home"
 mkdir -p "${no_jq_home}"
 run_bootstrap "${no_jq_home}" "${base_bin}" >"${work}/bootstrap.out"
-rg -qxF -- '--agent codex --configure-only' "${no_jq_home}/bootstrap-calls"
+[ -L "${no_jq_home}/.local/bin/agent-ready" ]
+rg -qx 'version=v9.9.9' "${no_jq_home}/.config/agent-ready/receipt"
+rg -q '^Tool routing \(use instead of defaults\):$' "${no_jq_home}/.codex/AGENTS.md"
 
-# A digest mismatch runs nothing.
+# A digest mismatch installs nothing and creates no launcher.
 wrong_digest_home="${work}/wrong-digest-home"
 mkdir -p "${wrong_digest_home}"
 jq '.assets[0].digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
@@ -1073,7 +1088,8 @@ if run_bootstrap "${wrong_digest_home}" "${test_path}" >"${work}/bootstrap.out" 
 	exit 1
 fi
 rg -qF 'checksum mismatch for agent-ready-v9.9.9.tar.gz; nothing installed' "${work}/bootstrap.out"
-[ ! -e "${wrong_digest_home}/bootstrap-calls" ]
+[ ! -e "${wrong_digest_home}/.local" ]
+[ ! -e "${wrong_digest_home}/.config/agent-ready/receipt" ]
 
 # A release without the archive is refused.
 no_asset_home="${work}/no-asset-home"
@@ -1084,7 +1100,7 @@ if run_bootstrap "${no_asset_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1
 	exit 1
 fi
 rg -qF 'agent-ready v9.9.9 has no verified release archive; use a newer release' "${work}/bootstrap.out"
-[ ! -e "${no_asset_home}/bootstrap-calls" ]
+[ ! -e "${no_asset_home}/.local" ]
 
 # An archive whose VERSION disagrees with the tag is refused after verification.
 version_home="${work}/version-home"
@@ -1095,7 +1111,237 @@ if run_bootstrap "${version_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1;
 	exit 1
 fi
 rg -qF 'agent-ready v9.9.9: archive VERSION does not match the tag' "${work}/bootstrap.out"
-[ ! -e "${version_home}/bootstrap-calls" ]
+[ ! -e "${version_home}/.local" ]
 publish_agent_ready v9.9.9
+
+# The local command: a verified release keeps its trees side by side and links
+# only the launcher, like the CodeGraph bundle. The fake HOME has the build
+# tools but none of the tools agent-ready installs, so doctor can report what is
+# missing without reaching the network.
+publish_agent_ready v9.9.0
+publish_agent_ready v9.9.1
+publish_agent_ready v9.9.2
+
+cli_home="${work}/cli-home"
+cli_bins="${work}/cli-bin"
+cli_versions="${cli_home}/.local/share/agent-ready/versions"
+cli_path="${cli_bins}:${base_bin}"
+mkdir -p "${cli_home}" "${cli_bins}"
+
+run_release() {
+	local home="$1" bins="$2" tag="$3" path="$4"
+	shift 4
+	HOME="${home}" PATH="${path}" \
+		XDG_CONFIG_HOME="${home}/.config" \
+		XDG_DATA_HOME="${home}/.local/share" \
+		AGENT_READY_BIN_DIR="${bins}" \
+		CODEX_HOME="${home}/.codex" \
+		AGENT_READY_REF="${tag}" AGENT_READY_GITHUB_API="file://${gh_api}" \
+		bash "${bootstrap_copy}/bootstrap.sh" "$@" </dev/null
+}
+run_cli() {
+	local home="$1" bins="$2" path="$3"
+	shift 3
+	HOME="${home}" PATH="${path}" \
+		XDG_CONFIG_HOME="${home}/.config" \
+		XDG_DATA_HOME="${home}/.local/share" \
+		AGENT_READY_BIN_DIR="${bins}" \
+		CODEX_HOME="${home}/.codex" \
+		"${bins}/agent-ready" "$@"
+}
+
+run_release "${cli_home}" "${cli_bins}" v9.9.0 "${base_bin}" codex --configure-only \
+	>"${work}/cli.out"
+[ -L "${cli_bins}/agent-ready" ]
+[ "$(readlink "${cli_bins}/agent-ready")" = "${cli_versions}/v9.9.0/agent-ready" ]
+rg -qF "agent-ready v9.9.0 installed in ${cli_versions}/v9.9.0" "${work}/cli.out"
+rg -qx 'version=v9.9.0' "${cli_home}/.config/agent-ready/receipt"
+rg -q '^Tool routing \(use instead of defaults\):$' "${cli_home}/.codex/AGENTS.md"
+
+# Rerunning the same release changes neither the tree nor the launcher.
+cli_agent_before=$(digest_of "${cli_versions}/v9.9.0/agent-ready")
+run_release "${cli_home}" "${cli_bins}" v9.9.0 "${base_bin}" codex --configure-only \
+	>"${work}/cli.out"
+rg -qF "agent-ready v9.9.0 is already in ${cli_versions}/v9.9.0" "${work}/cli.out"
+[ "$(digest_of "${cli_versions}/v9.9.0/agent-ready")" = "${cli_agent_before}" ]
+[ "$(readlink "${cli_bins}/agent-ready")" = "${cli_versions}/v9.9.0/agent-ready" ]
+[ ! -e "${cli_versions}/v9.9.1" ]
+
+# A newer release moves the launcher and keeps both trees.
+run_release "${cli_home}" "${cli_bins}" v9.9.1 "${base_bin}" codex --configure-only \
+	>"${work}/cli.out"
+[ "$(readlink "${cli_bins}/agent-ready")" = "${cli_versions}/v9.9.1/agent-ready" ]
+[ -d "${cli_versions}/v9.9.0" ]
+[ -d "${cli_versions}/v9.9.1" ]
+rg -qx 'version=v9.9.1' "${cli_home}/.config/agent-ready/receipt"
+
+# A third release keeps the two newest and prunes the rest.
+run_release "${cli_home}" "${cli_bins}" v9.9.2 "${base_bin}" codex --configure-only \
+	>"${work}/cli.out"
+[ "$(readlink "${cli_bins}/agent-ready")" = "${cli_versions}/v9.9.2/agent-ready" ]
+[ -d "${cli_versions}/v9.9.1" ]
+[ -d "${cli_versions}/v9.9.2" ]
+[ ! -e "${cli_versions}/v9.9.0" ]
+
+# status is read-only and reports the receipt, the launcher, and the drift.
+run_cli "${cli_home}" "${cli_bins}" "${cli_path}" status >"${work}/status.out"
+rg -qF 'agent-ready v9.9.2: ' "${work}/status.out"
+rg -qF "${cli_versions}/v9.9.2/agent-ready" "${work}/status.out"
+rg -qF 'receipt: ' "${work}/status.out"
+rg -qF 'version=v9.9.2' "${work}/status.out"
+rg -qF 'versions: v9.9.1 v9.9.2' "${work}/status.out"
+rg -qF 'drift:' "${work}/status.out"
+rg -q '^Codex: unchanged ' "${work}/status.out"
+
+# doctor fails here because the tools are missing, and writes nothing.
+receipt_before=$(digest_of "${cli_home}/.config/agent-ready/receipt")
+agent_before=$(digest_of "${cli_home}/.codex/AGENTS.md")
+rtk_before=$(line_count "${cli_home}/rtk-calls")
+if run_cli "${cli_home}" "${cli_bins}" "${cli_path}" doctor >"${work}/doctor.out" 2>&1; then
+	printf 'doctor passed in a HOME without the tools\n' >&2
+	exit 1
+fi
+rg -qF 'ok: launcher ' "${work}/doctor.out"
+rg -qF 'ok: receipt ' "${work}/doctor.out"
+rg -qF "ok: ${cli_bins} is on PATH" "${work}/doctor.out"
+rg -qF 'problem: rg is not on PATH' "${work}/doctor.out"
+rg -qF 'problem: codegraph is not on PATH' "${work}/doctor.out"
+rg -qF 'warn: mdq is not on PATH' "${work}/doctor.out"
+rg -qF 'ok: install.sh --dry-run reports nothing blocked' "${work}/doctor.out"
+[ "$(digest_of "${cli_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
+[ "$(digest_of "${cli_home}/.codex/AGENTS.md")" = "${agent_before}" ]
+[ "$(line_count "${cli_home}/rtk-calls")" -eq "${rtk_before}" ]
+
+# An unknown command prints the usage and exits 2.
+unknown_status=0
+run_cli "${cli_home}" "${cli_bins}" "${cli_path}" frobnicate >"${work}/usage.out" 2>&1 ||
+	unknown_status=$?
+[ "${unknown_status}" -eq 2 ]
+rg -qF 'usage: ' "${work}/usage.out"
+
+# --agent takes a comma list, configures every named agent and no other one, and
+# records the whole list as one entry.
+multi_home="${work}/multi-home"
+mkdir -p "${multi_home}"
+HOME="${multi_home}" PATH="${test_path}" XDG_CONFIG_HOME="${multi_home}/.config" \
+	"${root}/install.sh" --agent claude,codex --configure-only >/dev/null
+rg -q '^Tool routing \(use instead of defaults\):$' "${multi_home}/.claude/CLAUDE.md"
+rg -q '^Tool routing \(use instead of defaults\):$' "${multi_home}/.codex/AGENTS.md"
+rg -qx 'agents=claude,codex' "${multi_home}/.config/agent-ready/receipt"
+rg -qx 'configured=claude,codex' "${multi_home}/.config/agent-ready/receipt"
+rg -qxF 'install --yes --target=claude,codex --location=global --no-permissions' \
+	"${multi_home}/codegraph-calls"
+[ "$(line_count "${multi_home}/rtk-calls")" -eq 2 ]
+for untouched in \
+	"${multi_home}/.gemini/GEMINI.md" \
+	"${multi_home}/.copilot/copilot-instructions.md" \
+	"${multi_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${multi_home}/.grok/rules/agent-ready.md" \
+	"${multi_home}/.config/opencode/AGENTS.md" \
+	"${multi_home}/.qwen/QWEN.md" \
+	"${multi_home}/.cline/data/settings/rules/agent-ready.md" \
+	"${multi_home}/.config/kilo/AGENTS.md" \
+	"${multi_home}/.config/crush/CRUSH.md" \
+	"${multi_home}/.config/goose/AGENTS.md" \
+	"${multi_home}/.cursor/hooks.json"; do
+	[ ! -e "${untouched}" ]
+done
+
+# Aliases in a list resolve per item, CodeGraph gets the mapped targets, and an
+# unsupported agent is reported without blocking the others.
+alias_home="${work}/alias-home"
+mkdir -p "${alias_home}"
+HOME="${alias_home}" PATH="${test_path}" XDG_CONFIG_HOME="${alias_home}/.config" \
+	"${root}/install.sh" --agent claude-code,github-copilot,windsurf --configure-only \
+	>"${work}/alias.out" 2>&1
+rg -qx 'agents=claude,copilot,windsurf' "${alias_home}/.config/agent-ready/receipt"
+rg -qxF 'install --yes --target=claude,copilot-cli --location=global --no-permissions' \
+	"${alias_home}/codegraph-calls"
+rg -qF 'MCP setup is not available for windsurf' "${work}/alias.out"
+rg -q '^Tool routing \(use instead of defaults\):$' "${alias_home}/.claude/CLAUDE.md"
+rg -q '^Tool routing \(use instead of defaults\):$' "${alias_home}/.copilot/copilot-instructions.md"
+rg -q '^Tool routing \(use instead of defaults\):$' "${alias_home}/.codeium/windsurf/memories/global_rules.md"
+
+# auto cannot join a list, and an empty item is not an agent.
+for bad_agents in claude,auto claude,,codex; do
+	bad_status=0
+	HOME="${multi_home}" PATH="${test_path}" XDG_CONFIG_HOME="${multi_home}/.config" \
+		"${root}/install.sh" --agent "${bad_agents}" --configure-only >/dev/null 2>&1 ||
+		bad_status=$?
+	[ "${bad_status}" -eq 2 ]
+done
+
+# A later list joins the recorded explicit list instead of replacing it.
+HOME="${multi_home}" PATH="${test_path}" XDG_CONFIG_HOME="${multi_home}/.config" \
+	"${root}/install.sh" --agent codex,gemini --configure-only >/dev/null
+rg -qx 'agents=claude,codex,gemini' "${multi_home}/.config/agent-ready/receipt"
+rg -qx 'configured=claude,codex,gemini' "${multi_home}/.config/agent-ready/receipt"
+
+# rollback reinstalls the newest kept version below the receipt's and moves the
+# launcher back to it; the tree's own installer rewrites the receipt.
+rollback_home="${work}/rollback-home"
+rollback_bins="${work}/rollback-bin"
+rollback_versions="${rollback_home}/.local/share/agent-ready/versions"
+mkdir -p "${rollback_home}" "${rollback_bins}"
+run_release "${rollback_home}" "${rollback_bins}" v9.9.0 "${base_bin}" --agent claude,codex --configure-only >/dev/null
+run_release "${rollback_home}" "${rollback_bins}" v9.9.1 "${base_bin}" --agent claude,codex --configure-only >/dev/null
+rg -qx 'agents=claude,codex' "${rollback_home}/.config/agent-ready/receipt"
+rg -qx 'version=v9.9.1' "${rollback_home}/.config/agent-ready/receipt"
+run_cli "${rollback_home}" "${rollback_bins}" "${rollback_bins}:${base_bin}" rollback \
+	>"${work}/rollback.out"
+rg -qF 'Rolling back to agent-ready v9.9.0' "${work}/rollback.out"
+[ "$(readlink "${rollback_bins}/agent-ready")" = "${rollback_versions}/v9.9.0/agent-ready" ]
+rg -qx 'version=v9.9.0' "${rollback_home}/.config/agent-ready/receipt"
+rg -q '^<!-- agent-ready v9\.9\.0 sha256:[0-9a-f]{64} -->$' "${rollback_home}/.codex/AGENTS.md"
+rg -q '^<!-- agent-ready v9\.9\.0 sha256:[0-9a-f]{64} -->$' "${rollback_home}/.claude/CLAUDE.md"
+
+# Both repeated agents are compared with the installed tree, so the drift is
+# empty rather than half-checked.
+run_cli "${rollback_home}" "${rollback_bins}" "${rollback_bins}:${base_bin}" status \
+	>"${work}/rollback-status.out"
+rg -qF 'version=v9.9.0' "${work}/rollback-status.out"
+rg -q '^Claude Code: unchanged ' "${work}/rollback-status.out"
+rg -q '^Codex: unchanged ' "${work}/rollback-status.out"
+
+# Without an older tree kept there is nothing to roll back to.
+no_earlier_status=0
+run_cli "${rollback_home}" "${rollback_bins}" "${rollback_bins}:${base_bin}" rollback \
+	>"${work}/rollback.out" 2>&1 || no_earlier_status=$?
+[ "${no_earlier_status}" -eq 1 ]
+rg -qF 'no earlier version is kept; run agent-ready update v9.9.0' "${work}/rollback.out"
+
+# A launcher this installer did not create is kept, not shadowed.
+foreign_home="${work}/foreign-home"
+foreign_bins="${work}/foreign-bin"
+mkdir -p "${foreign_home}" "${foreign_bins}"
+printf '#!/bin/sh\nexit 0\n' >"${foreign_bins}/agent-ready"
+chmod +x "${foreign_bins}/agent-ready"
+cp "${foreign_bins}/agent-ready" "${work}/foreign-before"
+run_release "${foreign_home}" "${foreign_bins}" v9.9.0 "${base_bin}" codex --configure-only \
+	>"${work}/foreign.out"
+rg -qF "agent-ready: keeping the existing ${foreign_bins}/agent-ready; it was not installed by agent-ready" \
+	"${work}/foreign.out"
+cmp -s "${work}/foreign-before" "${foreign_bins}/agent-ready"
+[ -d "${foreign_home}/.local/share/agent-ready/versions/v9.9.0" ]
+
+# A failed install never self-installs and never touches the launcher.
+fail_home="${work}/cli-fail-home"
+fail_bins="${work}/cli-fail-bin"
+mkdir -p "${fail_home}/.codex" "${fail_bins}"
+cat >"${fail_home}/.codex/AGENTS.md" <<'EOF'
+user codex
+<!-- agent-ready:start -->
+broken block
+EOF
+cp "${fail_home}/.codex/AGENTS.md" "${work}/cli-fail-before"
+if run_release "${fail_home}" "${fail_bins}" v9.9.0 "${base_bin}" codex --configure-only \
+	>"${work}/cli-fail.out" 2>&1; then
+	printf 'a failing install self-installed\n' >&2
+	exit 1
+fi
+rg -qF 'malformed agent-ready markers' "${work}/cli-fail.out"
+cmp -s "${work}/cli-fail-before" "${fail_home}/.codex/AGENTS.md"
+[ ! -e "${fail_home}/.local" ]
+[ ! -e "${fail_bins}/agent-ready" ]
 
 printf 'installer routing checks passed\n'

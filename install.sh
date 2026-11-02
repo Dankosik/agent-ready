@@ -19,7 +19,7 @@ binaries=0
 force=0
 dry_run=0
 usage() {
-	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose] [--configure-only|--upgrade] [--binaries] [--force] [--dry-run]\n' "$0" >&2
+	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose|<name>,...] [--configure-only|--upgrade] [--binaries] [--force] [--dry-run]\n' "$0" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -59,20 +59,24 @@ done
 [ "${install_tools}" -eq 1 ] || { [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
 [ "${dry_run}" -eq 0 ] || { [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
 
-case "${agent}" in
-claude-code) agent=claude ;;
-cursor-agent) agent=cursor ;;
-gemini-cli) agent=gemini ;;
-github-copilot) agent=copilot ;;
-grok-build) agent=grok ;;
-open-code) agent=opencode ;;
-qwen-code) agent=qwen ;;
-kilocode | kilo-code) agent=kilo ;;
-esac
-case "${agent}" in
-auto | claude | codex | cursor | gemini | copilot | windsurf | grok | opencode | qwen | cline | kilo | crush | goose) ;;
-*) usage; exit 2 ;;
-esac
+# One name or a comma list, and every alias a selector list accepts resolves to
+# the canonical id used in blocks, receipts, and CodeGraph targets.
+normalise_agent() {
+	case "$1" in
+	claude-code) printf 'claude\n' ;;
+	cursor-agent) printf 'cursor\n' ;;
+	gemini-cli) printf 'gemini\n' ;;
+	github-copilot) printf 'copilot\n' ;;
+	grok-build) printf 'grok\n' ;;
+	open-code) printf 'opencode\n' ;;
+	qwen-code) printf 'qwen\n' ;;
+	kilocode | kilo-code) printf 'kilo\n' ;;
+	claude | codex | cursor | gemini | copilot | windsurf | grok | opencode | qwen | cline | kilo | crush | goose)
+		printf '%s\n' "$1"
+		;;
+	*) return 1 ;;
+	esac
+}
 
 # The header written into every managed block, and the receipt, name the
 # release that wrote them, so an update knows what it is replacing.
@@ -161,6 +165,8 @@ detect_goose() { command -v goose >/dev/null 2>&1; }
 agent_ids="claude codex cursor gemini copilot windsurf grok opencode qwen cline kilo crush goose"
 auto_detection=0
 selected_agents=
+# The canonical comma list of this run's explicit agents, in the order given.
+agents_csv=
 if [ "${agent}" = auto ]; then
 	auto_detection=1
 	for id in ${agent_ids}; do
@@ -169,7 +175,23 @@ if [ "${agent}" = auto ]; then
 		fi
 	done
 else
-	selected_agents=" ${agent}"
+	# --agent may name a comma list. Every item stands on its own: empty items,
+	# auto inside a list, and unknown names are usage errors, and repeats count
+	# once so the receipt and CodeGraph targets stay stable.
+	rest="${agent},"
+	while [ -n "${rest}" ]; do
+		item="${rest%%,*}"
+		rest="${rest#*,}"
+		[ -n "${item}" ] || { usage; exit 2; }
+		[ "${item}" != auto ] || { usage; exit 2; }
+		item=$(normalise_agent "${item}") || { usage; exit 2; }
+		case " ${selected_agents} " in
+		*" ${item} "*) continue ;;
+		esac
+		selected_agents="${selected_agents} ${item}"
+		[ -z "${agents_csv}" ] || agents_csv="${agents_csv},"
+		agents_csv="${agents_csv}${item}"
+	done
 fi
 
 agent_selected() {
@@ -521,19 +543,25 @@ install_cursor_hook() {
 # than reimplemented here. --no-permissions keeps it out of the agent's
 # auto-allow list, and telemetry is turned off afterwards.
 configure_codegraph() {
-	local target
+	local id target targets=
 	command -v codegraph >/dev/null 2>&1 || return 0
-	case "${agent}" in
-	auto) target=auto ;;
-	claude | codex | cursor | opencode | gemini) target="${agent}" ;;
-	copilot) target=copilot-cli ;;
-	*)
-		printf 'CodeGraph: MCP setup is not available for %s; the CLI routing still applies\n' "${agent}" >&2
-		target=
-		;;
-	esac
-	if [ -n "${target}" ]; then
-		codegraph install --yes --target="${target}" --location=global --no-permissions ||
+	if [ "${auto_detection}" -eq 1 ]; then
+		targets=auto
+	else
+		for id in ${selected_agents}; do
+			case "${id}" in
+			claude | codex | cursor | opencode | gemini) target="${id}" ;;
+			copilot) target=copilot-cli ;;
+			*)
+				printf 'CodeGraph: MCP setup is not available for %s; the CLI routing still applies\n' "${id}" >&2
+				target=
+				;;
+			esac
+			[ -z "${target}" ] || targets="${targets}${targets:+,}${target}"
+		done
+	fi
+	if [ -n "${targets}" ]; then
+		codegraph install --yes --target="${targets}" --location=global --no-permissions ||
 			printf 'CodeGraph: MCP setup failed; run codegraph install manually\n' >&2
 	fi
 	codegraph telemetry off >/dev/null 2>&1 ||
@@ -733,7 +761,9 @@ if [ "${found}" -eq 1 ]; then
 	if [ "${auto_detection}" -eq 1 ] || [ "${prev_agents}" = auto ]; then
 		agents_value=auto
 	else
-		agents_value=$(printf '%s\n%s\n' "${prev_agents}" "${agent}" | merge_lists)
+		# Every explicit agent this run configured joins the previous list, so a
+		# later update repeats all of them rather than only the newest.
+		agents_value=$(printf '%s\n%s\n' "${prev_agents}" "${agents_csv}" | merge_lists)
 	fi
 	if [ "${auto_detection}" -eq 1 ]; then
 		configured_value=$(printf '%s\n' "${configured_value}" | merge_lists)

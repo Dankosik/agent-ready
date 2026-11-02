@@ -305,6 +305,49 @@ To explicitly upgrade the generic tools:
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.2.1/bootstrap.sh | AGENT_READY_REF=v1.2.1 bash -s -- --upgrade
 ```
 
+## The `agent-ready` command
+
+Installing from a release also leaves a local `agent-ready` command, laid out
+like the CodeGraph bundle: every version keeps its own tree, and only a launcher
+is on `PATH`.
+
+```text
+${XDG_DATA_HOME:-$HOME/.local/share}/agent-ready/versions/vX.Y.Z/
+${AGENT_READY_BIN_DIR:-$HOME/.local/bin}/agent-ready -> .../versions/vX.Y.Z/agent-ready
+```
+
+An install keeps the version it installed and the one before it and removes
+older trees. A launcher you already have is kept unless this installer created
+it. The command takes the same arguments as the bootstrap, without downloading
+anything:
+
+```bash
+agent-ready                        # install with automatic detection
+agent-ready codex                  # configure one agent
+agent-ready --agent claude,codex   # configure a comma list
+agent-ready language go            # add Go support
+agent-ready status                 # tree, launcher, receipt, and drift
+agent-ready doctor                 # ok/problem for the install and every tool
+agent-ready rollback               # reinstall the newest kept older release
+```
+
+`status` prints the installed version, the launcher target, the receipt fields,
+the kept versions, and what this tree's installer would change. The drift check
+repeats the receipt's agents as one `--agent` list and the receipt's tool mode,
+so a machine installed with `--configure-only` is compared with `--configure-only`.
+`doctor` reports each check as `ok` or `problem` and exits non-zero when
+anything fails; `mdq` is only warned about because upstream publishes no arm64
+Linux build. Neither `status` nor `doctor` writes anything or uses the network.
+
+`rollback` is offline too. It finds the newest kept version below the receipt's
+and reruns that tree's installer with the receipt's agents, so the managed
+blocks and the receipt go back to that release; because an install keeps only
+two versions, it can go back one release.
+
+The local command appears after an install from a release. A checkout, a
+development ref, or an `AGENT_READY_ARCHIVE_URL` archive runs the requested
+install but does not install the command.
+
 ## Verify
 
 Quick check:

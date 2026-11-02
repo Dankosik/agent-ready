@@ -2,10 +2,6 @@
 
 set -euo pipefail
 
-usage() {
-	printf 'usage: %s [agent <name>|language <name>|<agent>] [installer options]\n' "$0" >&2
-}
-
 work=
 cleanup() { [ -z "${work}" ] || rm -rf "${work}"; }
 trap cleanup EXIT
@@ -13,6 +9,7 @@ trap cleanup EXIT
 # A checkout is a bootstrap.sh with install.sh beside it. Anything else,
 # including a lone copy, is the documented `curl | bash` download path.
 checkout=
+verified=0
 source_path="${BASH_SOURCE[0]:-}"
 if [ -n "${source_path}" ] && [ -f "${source_path}" ]; then
 	source_dir=$(cd -- "$(dirname -- "${source_path}")" && pwd)
@@ -134,6 +131,7 @@ else
 		unpack
 		[ "$(cat "${root}/VERSION" 2>/dev/null || true)" = "${ref}" ] ||
 			die "agent-ready ${ref}: archive VERSION does not match the tag"
+		verified=1
 	else
 		printf 'agent-ready %s is a development archive and is not verified\n' "${ref}" >&2
 		command -v curl >/dev/null 2>&1 || die "curl is required"
@@ -142,39 +140,14 @@ else
 	fi
 fi
 
-[ -n "${root}" ] && [ -f "${root}/install.sh" ] || { printf 'agent-ready installer not found\n' >&2; exit 1; }
+[ -n "${root}" ] && [ -f "${root}/install.sh" ] && [ -f "${root}/agent-ready" ] ||
+	{ printf 'agent-ready installer not found\n' >&2; exit 1; }
 
-case "${1:-}" in
-"")
-	bash "${root}/install.sh"
-	;;
-agent)
-	[ "$#" -ge 2 ] || { usage; exit 2; }
-	agent="$2"
-	shift 2
-	bash "${root}/install.sh" --agent "${agent}" "$@"
-	;;
-language)
-	[ "$#" -ge 2 ] || { usage; exit 2; }
-	language="$2"
-	shift 2
-	case "${language}" in
-	"" | *[!a-z0-9_-]*) printf 'unsupported language: %s\n' "${language}" >&2; exit 2 ;;
-	esac
-	installer="${root}/languages/${language}/install.sh"
-	[ -f "${installer}" ] || { printf 'unsupported language: %s\n' "${language}" >&2; exit 2; }
-	bash "${installer}" "$@"
-	;;
---agent | --configure-only | --upgrade | --binaries)
-	bash "${root}/install.sh" "$@"
-	;;
-claude | claude-code | codex | cursor | cursor-agent | gemini | gemini-cli | copilot | github-copilot | windsurf | grok | grok-build | opencode | open-code | qwen | qwen-code | cline | kilo | kilocode | kilo-code | crush | goose)
-	agent="$1"
-	shift
-	bash "${root}/install.sh" --agent "${agent}" "$@"
-	;;
-*)
-	usage
-	exit 2
-	;;
-esac
+# The dispatch lives in agent-ready. A verified release tree also installs that
+# command itself; a checkout, a dev ref, or an unverified archive only runs the
+# requested install.
+if [ "${verified}" -eq 1 ]; then
+	bash "${root}/agent-ready" --self-install "$@"
+else
+	bash "${root}/agent-ready" "$@"
+fi

@@ -37,8 +37,8 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Check scripts and Brewfiles
         run: |
-          bash -n bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh
-          shellcheck bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh
+          bash -n bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready
+          shellcheck bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready
           actionlint
           gitleaks dir --redact .
           gitleaks git --redact .
@@ -101,4 +101,4 @@ jobs:
         shell: pwsh
         run: |
           $repo = "/mnt/$($env:GITHUB_WORKSPACE.Substring(0, 1).ToLower())/$($env:GITHUB_WORKSPACE.Substring(3).Replace('\', '/'))"
-          wsl --distribution Ubuntu-24.04 --user root -- bash -lc "cd '$repo' && bash -n bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh languages/go/install.sh lib/receipt.sh && ./test-install.sh"
+          wsl --distribution Ubuntu-24.04 --user root -- bash -lc "cd '$repo' && bash -n bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh languages/go/install.sh lib/receipt.sh agent-ready && ./test-install.sh"

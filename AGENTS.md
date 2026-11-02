@@ -25,6 +25,10 @@ for people who run its installers against real machines and real agent configs.
   GitHub SHA-256 digest before unpacking it, refuse a release that does not
   publish `agent-ready-vX.Y.Z.tar.gz`, and send `GITHUB_TOKEN` only to
   `api.github.com`.
+- Release self-installs (`agent-ready --self-install`, passed only by
+  `bootstrap.sh` for a verified release) must write only the versions directory,
+  the launcher symlink, and the receipt, and must not replace a launcher they do
+  not own.
 
 ## Protect user machines
 
@@ -65,8 +69,8 @@ for people who run its installers against real machines and real agent configs.
 Run the checks that apply to the exact candidate. The full acceptance ladder is:
 
 ```bash
-rtk bash -n bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh
-rtk shellcheck bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh
+rtk bash -n bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready
+rtk shellcheck bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready
 rtk actionlint
 rtk gitleaks dir --redact .
 rtk gitleaks git --redact .
