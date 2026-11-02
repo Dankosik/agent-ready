@@ -4,12 +4,24 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "$0")" && pwd)
 
+# Assigned by lib/receipt.sh when a receipt is read.
+receipt_agents=
+receipt_configured=
+receipt_tools=
+# shellcheck source=lib/receipt.sh
+# shellcheck disable=SC1091
+. "${root}/lib/receipt.sh"
+
 agent=auto
 install_tools=1
 upgrade_tools=0
 binaries=0
+force=0
+dry_run=0
+uninstall=0
 usage() {
-	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose] [--configure-only|--upgrade] [--binaries]\n' "$0" >&2
+	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose|<name>,...] [--configure-only|--upgrade] [--binaries] [--force] [--dry-run]\n' "$0" >&2
+	printf '       %s --uninstall [--force] [--dry-run]\n' "$0" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -31,6 +43,18 @@ while [ "$#" -gt 0 ]; do
 		binaries=1
 		shift
 		;;
+	--force)
+		force=1
+		shift
+		;;
+	--dry-run)
+		dry_run=1
+		shift
+		;;
+	--uninstall)
+		uninstall=1
+		shift
+		;;
 	*)
 		usage
 		exit 2
@@ -39,160 +63,150 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ "${install_tools}" -eq 1 ] || { [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
+[ "${dry_run}" -eq 0 ] || { [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
+[ "${uninstall}" -eq 0 ] || { [ "${agent}" = auto ] && [ "${install_tools}" -eq 1 ] && [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
 
-case "${agent}" in
-claude-code) agent=claude ;;
-cursor-agent) agent=cursor ;;
-gemini-cli) agent=gemini ;;
-github-copilot) agent=copilot ;;
-grok-build) agent=grok ;;
-open-code) agent=opencode ;;
-qwen-code) agent=qwen ;;
-kilocode | kilo-code) agent=kilo ;;
-esac
-case "${agent}" in
-auto | claude | codex | cursor | gemini | copilot | windsurf | grok | opencode | qwen | cline | kilo | crush | goose) ;;
-*) usage; exit 2 ;;
-esac
-
-# On Linux the tools come from upstream release binaries unless Homebrew is
-# already there; --binaries chooses them even then. macOS always uses Homebrew.
-os="${AGENT_READY_OS:-$(uname -s)}"
-if [ "${install_tools}" -eq 1 ] && [ "${os}" = Linux ] &&
-	{ [ "${binaries}" -eq 1 ] || ! command -v brew >/dev/null 2>&1; }; then
-	if [ "${upgrade_tools}" -eq 1 ]; then
-		bash "${root}/install-binaries.sh" --upgrade
-	else
-		bash "${root}/install-binaries.sh"
-	fi
-	PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
-elif [ "${install_tools}" -eq 1 ]; then
-	[ "${binaries}" -eq 0 ] || {
-		printf -- '--binaries is supported on Linux only; use Homebrew on %s\n' "${os}" >&2
-		exit 2
-	}
-	command -v brew >/dev/null 2>&1 || {
-		printf 'Homebrew is required: https://brew.sh\n' >&2
-		exit 1
-	}
-	if [ "${upgrade_tools}" -eq 1 ]; then
-		brew bundle --file "${root}/Brewfile"
-	else
-		brew bundle --no-upgrade --file "${root}/Brewfile"
-	fi
-	# macOS ships no `timeout`, and agents call it by reflex. coreutils installs it
-	# as `gtimeout`; link only that one name, and never over an existing file.
-	if [ "${os}" = Darwin ] && ! command -v timeout >/dev/null 2>&1; then
-		gtimeout=$(command -v gtimeout || true)
-		timeout_link="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}/timeout"
-		if [ -z "${gtimeout}" ]; then
-			printf 'timeout: gtimeout not found; skipped\n' >&2
-		elif [ -L "${timeout_link}" ] && [ "$(readlink "${timeout_link}")" = "${gtimeout}" ]; then
-			printf 'timeout already linked\n'
-		elif [ -e "${timeout_link}" ] || [ -L "${timeout_link}" ]; then
-			printf 'timeout: keeping the existing %s\n' "${timeout_link}"
-		else
-			mkdir -p "$(dirname -- "${timeout_link}")"
-			ln -s "${gtimeout}" "${timeout_link}"
-			printf 'timeout: linked %s to %s\n' "${timeout_link}" "${gtimeout}"
-		fi
-	fi
-fi
-
-# CodeGraph publishes no Homebrew formula and ships one self-contained bundle per
-# platform, so it comes from its release archive whichever way the other tools
-# are installed. A copy this installer did not create (npm or upstream's own
-# installer) is kept rather than replaced.
-codegraph_state="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready/codegraph"
-if [ "${install_tools}" -eq 1 ]; then
-	if command -v codegraph >/dev/null 2>&1 && [ ! -f "${codegraph_state}" ]; then
-		printf 'codegraph: keeping the existing installation\n'
-	elif command -v codegraph >/dev/null 2>&1 && [ "${upgrade_tools}" -eq 0 ]; then
-		printf 'codegraph already installed\n'
-	elif [ "${upgrade_tools}" -eq 1 ]; then
-		bash "${root}/install-codegraph.sh" --upgrade
-		PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
-	else
-		bash "${root}/install-codegraph.sh"
-		PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
-	fi
-fi
-
-# Installing a tool is not the same as the agent using it. Measured on real
-# session transcripts, an agent reaches for the command it already knows —
-# `grep` over `rg`, `git worktree` over a wrapper — unless something tells it
-# otherwise. This writes that "something" into each harness's instruction file,
-# between markers, leaving everything else in the file untouched.
-
-base_routing="${root}/agent-routing.md"
-[ -f "${base_routing}" ] || {
-	printf 'missing %s\n' "${base_routing}" >&2
-	exit 1
-}
-routing="${base_routing}"
-routing_tmp=
-agent_ready_config="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready"
-if [ -f "${agent_ready_config}/languages/go" ]; then
-	go_routing="${root}/languages/go/agent-routing.md"
-	[ -f "${go_routing}" ] || {
-		printf 'missing %s\n' "${go_routing}" >&2
-		exit 1
-	}
-	routing_tmp=$(mktemp)
-	{
-		cat "${base_routing}"
-		printf '\n'
-		cat "${go_routing}"
-	} >"${routing_tmp}"
-	routing="${routing_tmp}"
-fi
-# `codegraph install` writes its own CodeGraph section into the Claude Code,
-# Codex, Gemini CLI, and OpenCode instruction files, so those files get the
-# block without the Code graph line instead of carrying the same rule twice.
-graph_routing="${routing}"
-graph_routing_tmp=
-if command -v codegraph >/dev/null 2>&1; then
-	graph_routing_tmp=$(mktemp)
-	grep -v '^- Code graph:' "${routing}" >"${graph_routing_tmp}"
-	graph_routing="${graph_routing_tmp}"
-fi
-cleanup_routing() {
-	[ -z "${routing_tmp}" ] || rm -f "${routing_tmp}"
-	[ -z "${graph_routing_tmp}" ] || rm -f "${graph_routing_tmp}"
-}
-trap cleanup_routing EXIT
-
-# CodeGraph's installer knows each agent's MCP config shape, including
-# OpenCode 2's `mcp.servers` migration, so the wiring is delegated to it rather
-# than reimplemented here. --no-permissions keeps it out of the agent's
-# auto-allow list, and telemetry is turned off afterwards.
-configure_codegraph() {
-	local target
-	command -v codegraph >/dev/null 2>&1 || return 0
-	case "${agent}" in
-	auto) target=auto ;;
-	claude | codex | cursor | opencode | gemini) target="${agent}" ;;
-	copilot) target=copilot-cli ;;
-	*)
-		printf 'CodeGraph: MCP setup is not available for %s; the CLI routing still applies\n' "${agent}" >&2
-		target=
+# One name or a comma list, and every alias a selector list accepts resolves to
+# the canonical id used in blocks, receipts, and CodeGraph targets.
+normalise_agent() {
+	case "$1" in
+	claude-code) printf 'claude\n' ;;
+	cursor-agent) printf 'cursor\n' ;;
+	gemini-cli) printf 'gemini\n' ;;
+	github-copilot) printf 'copilot\n' ;;
+	grok-build) printf 'grok\n' ;;
+	open-code) printf 'opencode\n' ;;
+	qwen-code) printf 'qwen\n' ;;
+	kilocode | kilo-code) printf 'kilo\n' ;;
+	claude | codex | cursor | gemini | copilot | windsurf | grok | opencode | qwen | cline | kilo | crush | goose)
+		printf '%s\n' "$1"
 		;;
+	*) return 1 ;;
 	esac
-	if [ -n "${target}" ]; then
-		codegraph install --yes --target="${target}" --location=global --no-permissions ||
-			printf 'CodeGraph: MCP setup failed; run codegraph install manually\n' >&2
-	fi
-	codegraph telemetry off >/dev/null 2>&1 ||
-		printf 'CodeGraph: could not disable telemetry; run codegraph telemetry off\n' >&2
 }
 
-command -v rtk >/dev/null 2>&1 || {
-	printf 'rtk is not installed; run %s first\n' "$0" >&2
+# The header written into every managed block, and the receipt, name the
+# release that wrote them, so an update knows what it is replacing.
+version_file="${root}/VERSION"
+[ -f "${version_file}" ] || {
+	printf 'missing %s\n' "${version_file}" >&2
 	exit 1
 }
+version=$(cat "${version_file}")
+[[ "${version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+	printf 'invalid version in %s: %s\n' "${version_file}" "${version}" >&2
+	exit 1
+}
+
+os="${AGENT_READY_OS:-$(uname -s)}"
 
 start='<!-- agent-ready:start -->'
 end='<!-- agent-ready:end -->'
+
+agent_label() {
+	case "$1" in
+	claude) printf 'Claude Code' ;;
+	codex) printf 'Codex' ;;
+	cursor) printf 'Cursor' ;;
+	gemini) printf 'Gemini CLI' ;;
+	copilot) printf 'GitHub Copilot CLI' ;;
+	windsurf) printf 'Windsurf' ;;
+	grok) printf 'Grok Build' ;;
+	opencode) printf 'OpenCode' ;;
+	qwen) printf 'Qwen Code' ;;
+	cline) printf 'Cline CLI' ;;
+	kilo) printf 'Kilo Code' ;;
+	crush) printf 'Crush' ;;
+	goose) printf 'goose' ;;
+	esac
+}
+
+agent_instructions() {
+	case "$1" in
+	claude) printf '%s\n' "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" ;;
+	codex) printf '%s\n' "${CODEX_HOME:-${HOME}/.codex}/AGENTS.md" ;;
+	gemini) printf '%s\n' "${HOME}/.gemini/GEMINI.md" ;;
+	copilot) printf '%s\n' "${COPILOT_HOME:-${HOME}/.copilot}/copilot-instructions.md" ;;
+	windsurf) printf '%s\n' "${HOME}/.codeium/windsurf/memories/global_rules.md" ;;
+	grok) printf '%s\n' "${GROK_HOME:-${HOME}/.grok}/rules/agent-ready.md" ;;
+	opencode) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" ;;
+	qwen) printf '%s\n' "${QWEN_HOME:-${HOME}/.qwen}/QWEN.md" ;;
+	cline) printf '%s\n' "${CLINE_DATA_DIR:-${HOME}/.cline/data}/settings/rules/agent-ready.md" ;;
+	kilo) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/kilo/AGENTS.md" ;;
+	crush) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/crush/CRUSH.md" ;;
+	goose) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/goose/AGENTS.md" ;;
+	esac
+}
+
+# `codegraph install` writes its own CodeGraph section into these four agents'
+# files, so their agent-ready block leaves out the Code graph line.
+agent_block() {
+	case "$1" in
+	claude | codex | gemini | opencode) printf '%s\n' "${graph_routing}" ;;
+	*) printf '%s\n' "${routing}" ;;
+	esac
+}
+
+# On Linux the tools come from upstream release binaries unless Homebrew is
+# already there; --binaries chooses them even then. macOS always uses Homebrew.
+detect_claude() { command -v claude >/dev/null 2>&1; }
+detect_codex() { command -v codex >/dev/null 2>&1; }
+detect_cursor() {
+	command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 ||
+		[ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]
+}
+detect_gemini() { command -v gemini >/dev/null 2>&1; }
+detect_copilot() { command -v copilot >/dev/null 2>&1; }
+detect_windsurf() {
+	command -v windsurf >/dev/null 2>&1 ||
+		[ -d /Applications/Windsurf.app ] || [ -d "${HOME}/Applications/Windsurf.app" ]
+}
+detect_grok() { command -v grok >/dev/null 2>&1; }
+detect_opencode() { command -v opencode >/dev/null 2>&1; }
+detect_qwen() { command -v qwen >/dev/null 2>&1; }
+detect_cline() { command -v cline >/dev/null 2>&1; }
+detect_kilo() { command -v kilo >/dev/null 2>&1; }
+detect_crush() { command -v crush >/dev/null 2>&1; }
+detect_goose() { command -v goose >/dev/null 2>&1; }
+
+agent_ids="claude codex cursor gemini copilot windsurf grok opencode qwen cline kilo crush goose"
+auto_detection=0
+selected_agents=
+# The canonical comma list of this run's explicit agents, in the order given.
+agents_csv=
+if [ "${agent}" = auto ]; then
+	auto_detection=1
+	for id in ${agent_ids}; do
+		if "detect_${id}"; then
+			selected_agents="${selected_agents} ${id}"
+		fi
+	done
+else
+	# --agent may name a comma list. Every item stands on its own: empty items,
+	# auto inside a list, and unknown names are usage errors, and repeats count
+	# once so the receipt and CodeGraph targets stay stable.
+	rest="${agent},"
+	while [ -n "${rest}" ]; do
+		item="${rest%%,*}"
+		rest="${rest#*,}"
+		[ -n "${item}" ] || { usage; exit 2; }
+		[ "${item}" != auto ] || { usage; exit 2; }
+		item=$(normalise_agent "${item}") || { usage; exit 2; }
+		case " ${selected_agents} " in
+		*" ${item} "*) continue ;;
+		esac
+		selected_agents="${selected_agents} ${item}"
+		[ -z "${agents_csv}" ] || agents_csv="${agents_csv},"
+		agents_csv="${agents_csv}${item}"
+	done
+fi
+
+agent_selected() {
+	case " ${selected_agents} " in
+	*" $1 "*) return 0 ;;
+	esac
+	return 1
+}
 
 resolve_target() {
 	local path="$1" link dir hops=0
@@ -226,8 +240,185 @@ block_state() {
 	' "$1"
 }
 
+block_first_line() {
+	awk -v s="${start}" -v e="${end}" '
+		$0 == s { inside = 1; next }
+		$0 == e { exit }
+		inside { print; exit }
+	' "$1"
+}
+
+# The body is emitted one newline per line, so an unterminated last line in a
+# routing file still produces the bytes that are written and hashed here.
+block_body() {
+	awk '{ print }' "$1"
+}
+
+# The block body is everything after the header line, each line newline
+# terminated, which is exactly what install_block writes.
+block_body_hash() {
+	awk -v s="${start}" -v e="${end}" '
+		$0 == s { inside = 1; first = 1; next }
+		$0 == e { exit }
+		inside {
+			if (first) first = 0
+			else print
+		}
+	' "$1" | sha256_stdin
+}
+
+block_has_header() {
+	printf '%s\n' "$1" | grep -Eq '^<!-- agent-ready v[^ ]+ sha256:[0-9a-f]{64} -->$'
+}
+
+sha256_stdin() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum | cut -d' ' -f1
+	else
+		shasum -a 256 | cut -d' ' -f1
+	fi
+}
+
+merge_lists() {
+	tr ',' '\n' | awk 'NF' | sort -u | join_lines
+}
+
+join_lines() {
+	awk 'BEGIN { ORS = "" } NR > 1 { printf "," } { print }'
+}
+
+preflight_report() {
+	[ "${dry_run}" -eq 0 ] || printf '%s: %s %s\n' "$1" "$2" "$3"
+}
+
+# Every problem is reported, not just the first; the run stops before any
+# write once the selected agents have all been checked.
+preflight_blocked() {
+	local label="$1" requested="$2" kind="$3" reason="$4"
+	blocked=$((blocked + 1))
+	case "${kind}" in
+	markers)
+		printf '%s: malformed agent-ready markers in %s\n' "${label}" "${requested}" >&2
+		reason="malformed agent-ready markers"
+		;;
+	edits)
+		printf '%s: %s has local edits inside the agent-ready block; move them outside the markers or rerun with --force\n' \
+			"${label}" "${requested}" >&2
+		reason="local edits inside the agent-ready block"
+		;;
+	*)
+		printf '%s: %s: %s\n' "${label}" "${requested}" "${reason}" >&2
+		;;
+	esac
+	[ "${dry_run}" -eq 0 ] || printf '%s: blocked (%s) %s\n' "${label}" "${reason}" "${requested}"
+}
+
+preflight_instruction() {
+	local label="$1" requested="$2" body="$3" target state header digest expected
+	target=$(resolve_target "${requested}") || {
+		preflight_blocked "${label}" "${requested}" other "unresolvable symlink"
+		return 0
+	}
+	if [ ! -f "${target}" ]; then
+		preflight_report "${label}" "would add" "${requested}"
+		return 0
+	fi
+	state=$(block_state "${target}")
+	case "${state}" in
+	absent)
+		preflight_report "${label}" "would add" "${requested}"
+		;;
+	invalid)
+		preflight_blocked "${label}" "${requested}" markers ""
+		;;
+	present)
+		header=$(block_first_line "${target}")
+		expected="<!-- agent-ready ${version} sha256:$(block_body "${body}" | sha256_stdin) -->"
+		if block_has_header "${header}"; then
+			digest="${header#* sha256:}"
+			digest="${digest%% -->*}"
+			if [ "${digest}" != "$(block_body_hash "${target}")" ]; then
+				if [ "${force}" -eq 1 ]; then
+					preflight_report "${label}" "would refresh" "${requested}"
+				else
+					preflight_blocked "${label}" "${requested}" edits ""
+				fi
+				return 0
+			fi
+		fi
+		if [ "${header}" = "${expected}" ]; then
+			preflight_report "${label}" unchanged "${requested}"
+		else
+			preflight_report "${label}" "would refresh" "${requested}"
+		fi
+		;;
+	esac
+}
+
+preflight_cursor() {
+	local label="Cursor" cursor_dir="${HOME}/.cursor" requested legacy state=absent hooks response current=1
+	requested="${cursor_dir}/hooks.json"
+	legacy="${cursor_dir}/AGENTS.md"
+	response="${cursor_dir}/hooks/agent-ready-session-start.json"
+	if [ -e "${legacy}" ] || [ -L "${legacy}" ]; then
+		state=$(block_state "${legacy}")
+		[ "${state}" != invalid ] || preflight_blocked "${label}" "${legacy}" markers ""
+	fi
+	if [ ! -f "${requested}" ] && [ ! -L "${requested}" ]; then
+		preflight_report "${label}" "would add" "${requested}"
+		return 0
+	fi
+	command -v jq >/dev/null 2>&1 || {
+		# A full run installs jq before configuring Cursor, so only a
+		# configure-only run has to fail closed here.
+		if [ "${install_tools}" -eq 1 ]; then
+			preflight_report "${label}" "would refresh" "${requested}"
+		else
+			preflight_blocked "${label}" "${requested}" other "jq is required to merge hooks.json"
+		fi
+		return 0
+	}
+	hooks=$(resolve_target "${requested}")
+	if ! jq -e -s '
+		length == 1
+		and (.[0] | type == "object")
+		and (((.[0].hooks // {}).sessionStart // []) | type) == "array"
+	' "${hooks}" >/dev/null 2>&1; then
+		preflight_blocked "${label}" "${requested}" other "hooks.json must be a JSON object whose hooks.sessionStart is an array or absent"
+		return 0
+	fi
+	# The run also retires a legacy AGENTS.md block and rewrites the hook
+	# response, so both count as a change.
+	if [ "${state}" = present ]; then current=0; fi
+	if [ ! -f "${response}" ]; then current=0; fi
+	if ! jq -e --arg command 'cat ./hooks/agent-ready-session-start.json' \
+		'([.hooks.sessionStart[] | select(.command == $command)] | length) == 1' \
+		"${hooks}" >/dev/null 2>&1; then
+		current=0
+	fi
+	if [ "${current}" -eq 1 ] && ! cmp -s "${response}" <(jq -Rs '{additional_context: .}' "${routing}"); then
+		current=0
+	fi
+	if [ "${current}" -eq 1 ]; then
+		preflight_report "${label}" unchanged "${requested}"
+	else
+		preflight_report "${label}" "would refresh" "${requested}"
+	fi
+}
+
+preflight_all() {
+	local id
+	for id in ${selected_agents}; do
+		if [ "${id}" = cursor ]; then
+			preflight_cursor
+		else
+			preflight_instruction "$(agent_label "${id}")" "$(agent_instructions "${id}")" "$(agent_block "${id}")"
+		fi
+	done
+}
+
 install_block() {
-	local requested="$1" label="$2" block="${3:-${routing}}" target tmp state
+	local requested="$1" label="$2" block="${3:-${routing}}" target tmp state header
 	mkdir -p "$(dirname -- "${requested}")"
 	target=$(resolve_target "${requested}")
 	mkdir -p "$(dirname -- "${target}")"
@@ -237,21 +428,30 @@ install_block() {
 		printf '%s: malformed agent-ready markers in %s\n' "${label}" "${requested}" >&2
 		return 1
 	}
+	header="<!-- agent-ready ${version} sha256:$(block_body "${block}" | sha256_stdin) -->"
 
 	tmp=$(mktemp "${target}.XXXXXX") || return 1
 	cp -p "${target}" "${tmp}"
 	if [ "${state}" = present ]; then
-		awk -v s="${start}" -v e="${end}" -v f="${block}" '
-			$0 == s { print; while ((getline line < f) > 0) print line; skip = 1; next }
-			$0 == e { skip = 0 }
-			!skip { print }
+		awk -v s="${start}" -v e="${end}" '
+			$0 == s { print; exit }
+			{ print }
 		' "${target}" >"${tmp}"
+		{
+			printf '%s\n' "${header}"
+			block_body "${block}"
+			awk -v e="${end}" '
+				found { print }
+				$0 == e { found = 1; print }
+			' "${target}"
+		} >>"${tmp}"
 	else
 		{
 			cat "${target}"
 			[ -s "${target}" ] && printf '\n'
 			printf '%s\n' "${start}"
-			cat "${block}"
+			printf '%s\n' "${header}"
+			block_body "${block}"
 			printf '%s\n' "${end}"
 		} >"${tmp}"
 	fi
@@ -270,20 +470,43 @@ remove_block() {
 	target=$(resolve_target "${requested}")
 	[ -f "${target}" ] || return 0
 	state=$(block_state "${target}")
-	[ "${state}" != invalid ] || {
+	case "${state}" in
+	absent) return 0 ;;
+	present) ;;
+	*)
 		printf '%s: malformed agent-ready markers in %s\n' "${label}" "${requested}" >&2
 		return 1
-	}
-	[ "${state}" = present ] || return 0
+		;;
+	esac
 	tmp=$(mktemp "${target}.XXXXXX") || return 1
-	cp -p "${target}" "${tmp}"
+	cp -p "${target}" "${tmp}" || {
+		rm -f "${tmp}"
+		return 1
+	}
+	# Install writes one blank line before a block it appends; drop that same
+	# separator so the file returns to the bytes it had before the install.
 	awk -v s="${start}" -v e="${end}" '
-		$0 == s { skip = 1; next }
+		function flush() { if (have) print prev; have = 0 }
+		$0 == s {
+			if (have && prev == "") have = 0
+			else flush()
+			skip = 1
+			next
+		}
 		$0 == e { skip = 0; next }
-		!skip { print }
+		skip { next }
+		{
+			flush()
+			prev = $0
+			have = 1
+		}
+		END { flush() }
 	' "${target}" >"${tmp}"
-	mv "${tmp}" "${target}"
-	printf '%s: removed legacy routing block from %s\n' "${label}" "${requested}"
+	mv "${tmp}" "${target}" || {
+		rm -f "${tmp}"
+		return 1
+	}
+	printf '%s: removed routing block from %s\n' "${label}" "${requested}"
 }
 
 configure_rtk() {
@@ -345,71 +568,615 @@ install_cursor_hook() {
 	remove_block "${cursor_dir}/AGENTS.md" "Cursor"
 }
 
+# CodeGraph's installer knows each agent's MCP config shape, including
+# OpenCode 2's `mcp.servers` migration, so the wiring is delegated to it rather
+# than reimplemented here. --no-permissions keeps it out of the agent's
+# auto-allow list, and telemetry is turned off afterwards.
+configure_codegraph() {
+	local id target targets=
+	command -v codegraph >/dev/null 2>&1 || return 0
+	if [ "${auto_detection}" -eq 1 ]; then
+		targets=auto
+	else
+		for id in ${selected_agents}; do
+			case "${id}" in
+			claude | codex | cursor | opencode | gemini) target="${id}" ;;
+			copilot) target=copilot-cli ;;
+			*)
+				printf 'CodeGraph: MCP setup is not available for %s; the CLI routing still applies\n' "${id}" >&2
+				target=
+				;;
+			esac
+			[ -z "${target}" ] || targets="${targets}${targets:+,}${target}"
+		done
+	fi
+	if [ -n "${targets}" ]; then
+		codegraph install --yes --target="${targets}" --location=global --no-permissions ||
+			printf 'CodeGraph: MCP setup failed; run codegraph install manually\n' >&2
+	fi
+	codegraph telemetry off >/dev/null 2>&1 ||
+		printf 'CodeGraph: could not disable telemetry; run codegraph telemetry off\n' >&2
+}
+
+# ---------------------------------------------------------------- uninstall
+# Uninstall removes only what this repository wrote: the managed blocks, its
+# own Cursor hook entry, and agent-ready's state. Tools and third-party
+# configuration stay; the exact commands to remove them are printed instead.
+
+uninstall_bin_dir="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}"
+uninstall_versions_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-ready/versions"
+uninstall_launcher="${uninstall_bin_dir}/agent-ready"
+uninstall_agents=
+uninstall_receipt_present=0
+
+uninstall_launcher_owned() {
+	local target
+	[ -L "${uninstall_launcher}" ] || return 1
+	target=$(resolve_target "${uninstall_launcher}") || return 1
+	case "${target}" in
+	"${uninstall_versions_dir}"/*) return 0 ;;
+	esac
+	return 1
+}
+
+uninstall_cursor_entry_present() {
+	local hooks="${HOME}/.cursor/hooks.json"
+	[ -f "${hooks}" ] && grep -qF 'cat ./hooks/agent-ready-session-start.json' "${hooks}"
+}
+
+uninstall_cursor_present() {
+	local response="${HOME}/.cursor/hooks/agent-ready-session-start.json"
+	local legacy="${HOME}/.cursor/AGENTS.md" state
+	if [ -f "${response}" ] || [ -L "${response}" ]; then
+		return 0
+	fi
+	if [ -f "${legacy}" ] || [ -L "${legacy}" ]; then
+		state=$(block_state "${legacy}")
+		if [ "${state}" != absent ]; then
+			return 0
+		fi
+	fi
+	uninstall_cursor_entry_present
+}
+
+# The receipt's configured agents, plus every agent whose file still carries
+# agent-ready markers: an earlier install without a receipt, or one run with a
+# different --agent, may have left a block the receipt does not name.
+uninstall_collect_agents() {
+	local id path state
+	uninstall_agents=
+	for id in ${agent_ids}; do
+		if [ "${uninstall_receipt_present}" -eq 1 ]; then
+			case ",${receipt_configured}," in
+			*",${id},"*)
+				uninstall_agents="${uninstall_agents} ${id}"
+				continue
+				;;
+			esac
+		fi
+		if [ "${id}" = cursor ]; then
+			if uninstall_cursor_present; then
+				uninstall_agents="${uninstall_agents} ${id}"
+			fi
+			continue
+		fi
+		path=$(agent_instructions "${id}")
+		[ -f "${path}" ] || [ -L "${path}" ] || continue
+		state=$(block_state "${path}") || state=invalid
+		if [ "${state}" != absent ]; then
+			uninstall_agents="${uninstall_agents} ${id}"
+		fi
+	done
+}
+
+uninstall_preflight_instruction() {
+	local id="$1" label requested target state header digest
+	label=$(agent_label "${id}")
+	requested=$(agent_instructions "${id}")
+	[ -f "${requested}" ] || [ -L "${requested}" ] || return 0
+	target=$(resolve_target "${requested}") || {
+		preflight_blocked "${label}" "${requested}" other "unresolvable symlink"
+		return 0
+	}
+	[ -f "${target}" ] || return 0
+	state=$(block_state "${target}") || state=invalid
+	case "${state}" in
+	absent) ;;
+	invalid) preflight_blocked "${label}" "${requested}" markers "" ;;
+	present)
+		header=$(block_first_line "${target}")
+		if block_has_header "${header}"; then
+			digest="${header#* sha256:}"
+			digest="${digest%% -->*}"
+			if [ "${digest}" != "$(block_body_hash "${target}")" ] && [ "${force}" -eq 0 ]; then
+				preflight_blocked "${label}" "${requested}" edits ""
+				return 0
+			fi
+		fi
+		preflight_report "${label}" "would remove" "${requested}"
+		;;
+	esac
+}
+
+uninstall_preflight_cursor() {
+	local cursor_dir="${HOME}/.cursor" requested legacy response hooks target state header digest
+	legacy="${cursor_dir}/AGENTS.md"
+	if [ -f "${legacy}" ] || [ -L "${legacy}" ]; then
+		target=$(resolve_target "${legacy}") || target=
+		if [ -z "${target}" ]; then
+			preflight_blocked "Cursor" "${legacy}" other "unresolvable symlink"
+		elif [ -f "${target}" ]; then
+			state=$(block_state "${target}") || state=invalid
+			case "${state}" in
+			absent) ;;
+			invalid) preflight_blocked "Cursor" "${legacy}" markers "" ;;
+			present)
+				header=$(block_first_line "${target}")
+				if block_has_header "${header}"; then
+					digest="${header#* sha256:}"
+					digest="${digest%% -->*}"
+					if [ "${digest}" != "$(block_body_hash "${target}")" ] && [ "${force}" -eq 0 ]; then
+						preflight_blocked "Cursor" "${legacy}" edits ""
+					else
+						preflight_report "Cursor" "would remove legacy routing block from" "${legacy}"
+					fi
+				else
+					preflight_report "Cursor" "would remove legacy routing block from" "${legacy}"
+				fi
+				;;
+			esac
+		fi
+	fi
+	requested="${cursor_dir}/hooks.json"
+	if [ -f "${requested}" ] || [ -L "${requested}" ]; then
+		hooks=$(resolve_target "${requested}") || hooks=
+		if [ -z "${hooks}" ]; then
+			preflight_blocked "Cursor" "${requested}" other "unresolvable symlink"
+		elif ! command -v jq >/dev/null 2>&1; then
+			if uninstall_cursor_entry_present; then
+				preflight_blocked "Cursor" "${requested}" other "jq is required to edit hooks.json"
+			fi
+		elif ! jq -e -s '
+			length == 1
+			and (.[0] | type == "object")
+			and (((.[0].hooks // {}).sessionStart // []) | type) == "array"
+		' "${hooks}" >/dev/null 2>&1; then
+			preflight_blocked "Cursor" "${requested}" other "hooks.json must be a JSON object whose hooks.sessionStart is an array or absent"
+		elif jq -e --arg command 'cat ./hooks/agent-ready-session-start.json' \
+			'([.hooks.sessionStart[]? | select((type == "object") and (.command == $command))] | length) > 0' \
+			"${hooks}" >/dev/null 2>&1; then
+			preflight_report "Cursor" "would remove the session hook" "${requested}"
+		fi
+	fi
+	response="${cursor_dir}/hooks/agent-ready-session-start.json"
+	if [ -f "${response}" ] || [ -L "${response}" ]; then
+		preflight_report "Cursor" "would remove" "${response}"
+	fi
+}
+
+uninstall_remove_instruction() {
+	local id="$1" label requested target state
+	label=$(agent_label "${id}")
+	requested=$(agent_instructions "${id}")
+	[ -e "${requested}" ] || [ -L "${requested}" ] || return 0
+	target=$(resolve_target "${requested}") || return 1
+	[ -f "${target}" ] || return 0
+	state=$(block_state "${target}") || state=invalid
+	[ "${state}" = present ] || return 0
+	remove_block "${requested}" "${label}"
+}
+
+uninstall_remove_cursor() {
+	local cursor_dir="${HOME}/.cursor" requested response legacy hooks tmp
+	local command='cat ./hooks/agent-ready-session-start.json'
+	legacy="${cursor_dir}/AGENTS.md"
+	remove_block "${legacy}" "Cursor" || return 1
+
+	requested="${cursor_dir}/hooks.json"
+	if [ -e "${requested}" ] || [ -L "${requested}" ]; then
+		hooks=$(resolve_target "${requested}") || return 1
+		if [ -f "${hooks}" ] && command -v jq >/dev/null 2>&1 &&
+			jq -e --arg command "${command}" \
+				'([.hooks.sessionStart[]? | select((type == "object") and (.command == $command))] | length) > 0' \
+				"${hooks}" >/dev/null 2>&1; then
+			tmp=$(mktemp "${hooks}.XXXXXX") || return 1
+			cp -p "${hooks}" "${tmp}"
+			if ! jq --arg command "${command}" '
+				if type != "object" then error("hooks.json root must be an object") else . end
+				| .hooks = (.hooks // {})
+				| if ((.hooks.sessionStart // []) | type) != "array"
+					then error("hooks.sessionStart must be an array") else . end
+				| .hooks.sessionStart = ([.hooks.sessionStart[]?
+					| select((type != "object") or (.command != $command))])
+			' "${hooks}" >"${tmp}"; then
+				rm -f "${tmp}"
+				return 1
+			fi
+			mv "${tmp}" "${hooks}" || {
+				rm -f "${tmp}"
+				return 1
+			}
+			printf 'Cursor: removed the session hook from %s\n' "${requested}"
+		fi
+	fi
+
+	response="${cursor_dir}/hooks/agent-ready-session-start.json"
+	if [ -e "${response}" ] || [ -L "${response}" ]; then
+		rm -f -- "${response}"
+		printf 'Cursor: removed %s\n' "${response}"
+	fi
+}
+
+uninstall_action() {
+	local what="$1" path="$2"
+	if [ "${dry_run}" -eq 1 ]; then
+		printf 'would remove %s %s\n' "${what}" "${path}"
+	else
+		rm -rf -- "${path}"
+		printf 'removed %s %s\n' "${what}" "${path}"
+	fi
+}
+
+# The tool state files describe installs that are still useful on their own, so
+# they outlive the configuration they came with.
+uninstall_state_files() {
+	local config="$1" state bin keep
+	state="${config}/codegraph"
+	if [ -f "${state}" ]; then
+		if [ -e "${uninstall_bin_dir}/codegraph" ] || command -v codegraph >/dev/null 2>&1; then
+			printf 'keeping %s: codegraph is still installed\n' "${state}"
+		else
+			uninstall_action "codegraph state" "${state}"
+		fi
+	fi
+	state="${config}/binaries"
+	if [ -f "${state}" ]; then
+		keep=0
+		for bin in jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine; do
+			if [ -e "${uninstall_bin_dir}/${bin}" ]; then
+				keep=1
+				break
+			fi
+		done
+		if [ "${keep}" -eq 1 ]; then
+			printf 'keeping %s: its tools are still installed\n' "${state}"
+		else
+			uninstall_action "binaries state" "${state}"
+		fi
+	fi
+}
+
+uninstall_state() {
+	local receipt config
+	receipt=$(receipt_path)
+	config=$(dirname -- "${receipt}")
+	if [ -e "${receipt}" ] || [ -L "${receipt}" ]; then
+		uninstall_action "receipt" "${receipt}"
+	fi
+	if [ -e "${config}/languages" ] || [ -L "${config}/languages" ]; then
+		uninstall_action "languages state" "${config}/languages"
+	fi
+	if [ -L "${uninstall_launcher}" ]; then
+		if uninstall_launcher_owned; then
+			uninstall_action "launcher" "${uninstall_launcher}"
+		else
+			printf 'keeping %s: it was not installed by agent-ready\n' "${uninstall_launcher}"
+		fi
+	elif [ -e "${uninstall_launcher}" ]; then
+		printf 'keeping %s: it was not installed by agent-ready\n' "${uninstall_launcher}"
+	fi
+	uninstall_state_files "${config}"
+	# Last, because a release install runs this tree from inside it.
+	if [ -e "${uninstall_versions_dir}" ] || [ -L "${uninstall_versions_dir}" ]; then
+		uninstall_action "versions directory" "${uninstall_versions_dir}"
+	fi
+}
+
+uninstall_tools_hint() {
+	local mode tool bin formula names='' paths='' bundle
+	mode="${receipt_tools:-$(receipt_legacy_tools)}"
+	if [ "${mode}" = brew ]; then
+		for tool in rtk:rtk rg:ripgrep ast-grep:ast-grep sd:sd uv:uv jq:jq yq:yq mdq:mdq \
+			gh:gh wt:worktrunk difft:difftastic gitleaks:gitleaks actionlint:actionlint \
+			shellcheck:shellcheck hyperfine:hyperfine; do
+			bin="${tool%%:*}"
+			formula="${tool#*:}"
+			command -v "${bin}" >/dev/null 2>&1 || continue
+			names="${names}${names:+ }${formula}"
+		done
+		if [ -n "${names}" ]; then
+			printf '\nTools are still installed; agent-ready does not remove them:\n'
+			printf '  brew uninstall %s\n' "${names}"
+		fi
+	else
+		for bin in rtk rg ast-grep sd uv uvx jq yq mdq gh wt git-wt difft gitleaks \
+			actionlint shellcheck hyperfine gopls; do
+			[ ! -e "${uninstall_bin_dir}/${bin}" ] ||
+				paths="${paths}${paths:+ }${uninstall_bin_dir}/${bin}"
+		done
+		if [ -n "${paths}" ]; then
+			printf '\nTools are still installed; agent-ready does not remove them:\n'
+			printf '  rm %s\n' "${paths}"
+		fi
+	fi
+	bundle="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-ready/codegraph"
+	if [ -e "${bundle}" ] || [ -L "${uninstall_bin_dir}/codegraph" ]; then
+		printf '  codegraph bundle: rm -rf %s %s\n' "${bundle}" "${uninstall_bin_dir}/codegraph"
+	fi
+	printf '  RTK integration: rtk init -g --uninstall\n'
+	printf '  CodeGraph MCP wiring: codegraph uninstall --location global --keep-cli --target <agents>\n'
+}
+
+uninstall_main() {
+	local receipt id
+	blocked=0
+	receipt=$(receipt_path)
+	uninstall_receipt_present=0
+	if [ -e "${receipt}" ] || [ -L "${receipt}" ]; then
+		receipt_read "${receipt}" || return 1
+		uninstall_receipt_present=1
+	fi
+	uninstall_collect_agents
+	for id in ${uninstall_agents}; do
+		if [ "${id}" = cursor ]; then
+			uninstall_preflight_cursor
+		else
+			uninstall_preflight_instruction "${id}"
+		fi
+	done
+	if [ "${blocked}" -ne 0 ]; then
+		return 1
+	fi
+	if [ "${dry_run}" -eq 1 ]; then
+		uninstall_state
+		uninstall_tools_hint
+		return 0
+	fi
+	for id in ${uninstall_agents}; do
+		if [ "${id}" = cursor ]; then
+			uninstall_remove_cursor || return 1
+		else
+			uninstall_remove_instruction "${id}" || return 1
+		fi
+	done
+	uninstall_state
+	uninstall_tools_hint
+}
+
+if [ "${uninstall}" -eq 1 ]; then
+	uninstall_main
+	exit 0
+fi
+
+# Installing a tool is not the same as the agent using it. Measured on real
+# session transcripts, an agent reaches for the command it already knows —
+# `grep` over `rg`, `git worktree` over a wrapper — unless something tells it
+# otherwise. This writes that "something" into each harness's instruction file,
+# between markers, leaving everything else in the file untouched.
+
+base_routing="${root}/agent-routing.md"
+[ -f "${base_routing}" ] || {
+	printf 'missing %s\n' "${base_routing}" >&2
+	exit 1
+}
+routing="${base_routing}"
+routing_tmp=
+agent_ready_config="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready"
+if [ -f "${agent_ready_config}/languages/go" ]; then
+	go_routing="${root}/languages/go/agent-routing.md"
+	[ -f "${go_routing}" ] || {
+		printf 'missing %s\n' "${go_routing}" >&2
+		exit 1
+	}
+	routing_tmp=$(mktemp)
+	{
+		cat "${base_routing}"
+		printf '\n'
+		cat "${go_routing}"
+	} >"${routing_tmp}"
+	routing="${routing_tmp}"
+fi
+# The block is prepared before preflight, so it has to assume the CodeGraph
+# install this run would perform: a real run installs or keeps it, and a
+# dry run must describe the same block.
+codegraph_available=0
+if command -v codegraph >/dev/null 2>&1 || [ "${install_tools}" -eq 1 ]; then
+	codegraph_available=1
+fi
+graph_routing="${routing}"
+graph_routing_tmp=
+if [ "${codegraph_available}" -eq 1 ]; then
+	graph_routing_tmp=$(mktemp)
+	grep -v '^- Code graph:' "${routing}" >"${graph_routing_tmp}"
+	graph_routing="${graph_routing_tmp}"
+fi
+cleanup_routing() {
+	[ -z "${routing_tmp}" ] || rm -f "${routing_tmp}"
+	[ -z "${graph_routing_tmp}" ] || rm -f "${graph_routing_tmp}"
+}
+trap cleanup_routing EXIT
+
+# A stale receipt must stop the run before any tool or agent is touched, and
+# this run's receipt is built from the previous one.
+receipt_file=$(receipt_path)
+prev_agents=
+prev_configured=
+prev_tools=
+blocked=0
+if [ -f "${receipt_file}" ]; then
+	receipt_read "${receipt_file}" || exit 1
+	prev_agents="${receipt_agents}"
+	prev_configured="${receipt_configured}"
+	prev_tools="${receipt_tools}"
+fi
+
+preflight_all
+
+if [ "${dry_run}" -eq 1 ]; then
+	[ "${blocked}" -eq 0 ] || exit 1
+	exit 0
+fi
+[ "${blocked}" -eq 0 ] || exit 1
+
+tools_used=
+if [ "${install_tools}" -eq 1 ] && [ "${os}" = Linux ] &&
+	{ [ "${binaries}" -eq 1 ] || ! command -v brew >/dev/null 2>&1; }; then
+	tools_used=binaries
+	if [ "${upgrade_tools}" -eq 1 ]; then
+		bash "${root}/install-binaries.sh" --upgrade
+	else
+		bash "${root}/install-binaries.sh"
+	fi
+	PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
+elif [ "${install_tools}" -eq 1 ]; then
+	tools_used=brew
+	[ "${binaries}" -eq 0 ] || {
+		printf -- '--binaries is supported on Linux only; use Homebrew on %s\n' "${os}" >&2
+		exit 2
+	}
+	command -v brew >/dev/null 2>&1 || {
+		printf 'Homebrew is required: https://brew.sh\n' >&2
+		exit 1
+	}
+	if [ "${upgrade_tools}" -eq 1 ]; then
+		brew bundle --file "${root}/Brewfile"
+	else
+		brew bundle --no-upgrade --file "${root}/Brewfile"
+	fi
+	# macOS ships no `timeout`, and agents call it by reflex. coreutils installs it
+	# as `gtimeout`; link only that one name, and never over an existing file.
+	if [ "${os}" = Darwin ] && ! command -v timeout >/dev/null 2>&1; then
+		gtimeout=$(command -v gtimeout || true)
+		timeout_link="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}/timeout"
+		if [ -z "${gtimeout}" ]; then
+			printf 'timeout: gtimeout not found; skipped\n' >&2
+		elif [ -L "${timeout_link}" ] && [ "$(readlink "${timeout_link}")" = "${gtimeout}" ]; then
+			printf 'timeout already linked\n'
+		elif [ -e "${timeout_link}" ] || [ -L "${timeout_link}" ]; then
+			printf 'timeout: keeping the existing %s\n' "${timeout_link}"
+		else
+			mkdir -p "$(dirname -- "${timeout_link}")"
+			ln -s "${gtimeout}" "${timeout_link}"
+			printf 'timeout: linked %s to %s\n' "${timeout_link}" "${gtimeout}"
+		fi
+	fi
+fi
+
+# CodeGraph publishes no Homebrew formula and ships one self-contained bundle per
+# platform, so it comes from its release archive whichever way the other tools
+# are installed. A copy this installer did not create (npm or upstream's own
+# installer) is kept rather than replaced.
+codegraph_state="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready/codegraph"
+if [ "${install_tools}" -eq 1 ]; then
+	if command -v codegraph >/dev/null 2>&1 && [ ! -f "${codegraph_state}" ]; then
+		printf 'codegraph: keeping the existing installation\n'
+	elif command -v codegraph >/dev/null 2>&1 && [ "${upgrade_tools}" -eq 0 ]; then
+		printf 'codegraph already installed\n'
+	elif [ "${upgrade_tools}" -eq 1 ]; then
+		bash "${root}/install-codegraph.sh" --upgrade
+		PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
+	else
+		bash "${root}/install-codegraph.sh"
+		PATH="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}:${PATH}"
+	fi
+fi
+
+command -v rtk >/dev/null 2>&1 || {
+	printf 'rtk is not installed; run %s first\n' "$0" >&2
+	exit 1
+}
+
 found=0
-if [ "${agent}" = claude ] || { [ "${agent}" = auto ] && command -v claude >/dev/null 2>&1; }; then
+if agent_selected claude; then
 	found=1
-	configure_rtk "Claude Code" -g --hook-only --auto-patch --no-trust-filters
-	install_block "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" "Claude Code" "${graph_routing}"
+	configure_rtk "$(agent_label claude)" -g --hook-only --auto-patch --no-trust-filters
+	install_block "$(agent_instructions claude)" "$(agent_label claude)" "$(agent_block claude)"
 fi
-if [ "${agent}" = codex ] || { [ "${agent}" = auto ] && command -v codex >/dev/null 2>&1; }; then
+if agent_selected codex; then
 	found=1
-	configure_rtk "Codex" -g --codex --no-trust-filters
-	install_block "${CODEX_HOME:-${HOME}/.codex}/AGENTS.md" "Codex" "${graph_routing}"
+	configure_rtk "$(agent_label codex)" -g --codex --no-trust-filters
+	install_block "$(agent_instructions codex)" "$(agent_label codex)" "$(agent_block codex)"
 fi
-if [ "${agent}" = cursor ] || { [ "${agent}" = auto ] && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 || [ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]; }; }; then
+if agent_selected cursor; then
 	found=1
 	mkdir -p "${HOME}/.cursor"
-	configure_rtk "Cursor" -g --agent cursor --hook-only --no-patch --no-trust-filters >/dev/null
+	configure_rtk "$(agent_label cursor)" -g --agent cursor --hook-only --no-patch --no-trust-filters >/dev/null
 	printf 'Cursor: configured RTK integration\n'
 	install_cursor_hook
 fi
-if [ "${agent}" = gemini ] || { [ "${agent}" = auto ] && command -v gemini >/dev/null 2>&1; }; then
+if agent_selected gemini; then
 	found=1
-	configure_rtk "Gemini CLI" -g --gemini --hook-only --auto-patch --no-trust-filters
-	install_block "${HOME}/.gemini/GEMINI.md" "Gemini CLI" "${graph_routing}"
+	configure_rtk "$(agent_label gemini)" -g --gemini --hook-only --auto-patch --no-trust-filters
+	install_block "$(agent_instructions gemini)" "$(agent_label gemini)" "$(agent_block gemini)"
 fi
-if [ "${agent}" = copilot ] || { [ "${agent}" = auto ] && command -v copilot >/dev/null 2>&1; }; then
+if agent_selected copilot; then
 	found=1
-	configure_rtk "GitHub Copilot CLI" -g --copilot --hook-only --auto-patch --no-trust-filters
-	install_block "${COPILOT_HOME:-${HOME}/.copilot}/copilot-instructions.md" "GitHub Copilot CLI"
+	configure_rtk "$(agent_label copilot)" -g --copilot --hook-only --auto-patch --no-trust-filters
+	install_block "$(agent_instructions copilot)" "$(agent_label copilot)" "$(agent_block copilot)"
 fi
-if [ "${agent}" = windsurf ] || { [ "${agent}" = auto ] && { command -v windsurf >/dev/null 2>&1 || [ -d /Applications/Windsurf.app ] || [ -d "${HOME}/Applications/Windsurf.app" ]; }; }; then
+if agent_selected windsurf; then
 	found=1
-	install_block "${HOME}/.codeium/windsurf/memories/global_rules.md" "Windsurf"
+	install_block "$(agent_instructions windsurf)" "$(agent_label windsurf)" "$(agent_block windsurf)"
 fi
-if [ "${agent}" = grok ] || { [ "${agent}" = auto ] && command -v grok >/dev/null 2>&1; }; then
+if agent_selected grok; then
 	found=1
-	install_block "${GROK_HOME:-${HOME}/.grok}/rules/agent-ready.md" "Grok Build"
+	install_block "$(agent_instructions grok)" "$(agent_label grok)" "$(agent_block grok)"
 fi
-if [ "${agent}" = opencode ] || { [ "${agent}" = auto ] && command -v opencode >/dev/null 2>&1; }; then
+if agent_selected opencode; then
 	found=1
-	configure_rtk "OpenCode" -g --opencode --hook-only --no-patch --no-trust-filters >/dev/null
+	configure_rtk "$(agent_label opencode)" -g --opencode --hook-only --no-patch --no-trust-filters >/dev/null
 	printf 'OpenCode: configured RTK integration\n'
-	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" "OpenCode" "${graph_routing}"
+	install_block "$(agent_instructions opencode)" "$(agent_label opencode)" "$(agent_block opencode)"
 fi
-if [ "${agent}" = qwen ] || { [ "${agent}" = auto ] && command -v qwen >/dev/null 2>&1; }; then
+if agent_selected qwen; then
 	found=1
-	install_block "${QWEN_HOME:-${HOME}/.qwen}/QWEN.md" "Qwen Code"
+	install_block "$(agent_instructions qwen)" "$(agent_label qwen)" "$(agent_block qwen)"
 fi
-if [ "${agent}" = cline ] || { [ "${agent}" = auto ] && command -v cline >/dev/null 2>&1; }; then
+if agent_selected cline; then
 	found=1
-	install_block "${CLINE_DATA_DIR:-${HOME}/.cline/data}/settings/rules/agent-ready.md" "Cline CLI"
+	install_block "$(agent_instructions cline)" "$(agent_label cline)" "$(agent_block cline)"
 fi
-if [ "${agent}" = kilo ] || { [ "${agent}" = auto ] && command -v kilo >/dev/null 2>&1; }; then
+if agent_selected kilo; then
 	found=1
-	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/kilo/AGENTS.md" "Kilo Code"
+	install_block "$(agent_instructions kilo)" "$(agent_label kilo)" "$(agent_block kilo)"
 fi
-if [ "${agent}" = crush ] || { [ "${agent}" = auto ] && command -v crush >/dev/null 2>&1; }; then
+if agent_selected crush; then
 	found=1
-	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/crush/CRUSH.md" "Crush"
+	install_block "$(agent_instructions crush)" "$(agent_label crush)" "$(agent_block crush)"
 fi
-if [ "${agent}" = goose ] || { [ "${agent}" = auto ] && command -v goose >/dev/null 2>&1; }; then
+if agent_selected goose; then
 	found=1
-	install_block "${XDG_CONFIG_HOME:-${HOME}/.config}/goose/AGENTS.md" "goose"
+	install_block "$(agent_instructions goose)" "$(agent_label goose)" "$(agent_block goose)"
 fi
 
 # Run last: a malformed instructions file must stop the installer before a
 # third-party installer gets a chance to edit it.
 configure_codegraph
+
+if [ "${found}" -eq 1 ]; then
+	configured_value=$(for id in ${selected_agents}; do printf '%s\n' "${id}"; done | merge_lists)
+	if [ "${auto_detection}" -eq 1 ] || [ "${prev_agents}" = auto ]; then
+		agents_value=auto
+	else
+		# Every explicit agent this run configured joins the previous list, so a
+		# later update repeats all of them rather than only the newest.
+		agents_value=$(printf '%s\n%s\n' "${prev_agents}" "${agents_csv}" | merge_lists)
+	fi
+	if [ "${auto_detection}" -eq 1 ]; then
+		configured_value=$(printf '%s\n' "${configured_value}" | merge_lists)
+	else
+		configured_value=$(printf '%s\n%s\n' "${prev_configured}" "${configured_value}" | merge_lists)
+	fi
+	languages_value=
+	if [ -d "${agent_ready_config}/languages" ]; then
+		languages_value=$(
+			find "${agent_ready_config}/languages" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; |
+				awk '/^[a-z0-9_-]+$/' | sort -u | join_lines
+		)
+	fi
+	tools_value="${prev_tools:-none}"
+	[ "${install_tools}" -eq 0 ] || tools_value="${tools_used}"
+	receipt_write "$(receipt_path)" "${version}" "${agents_value}" "${configured_value}" "${languages_value}" "${tools_value}"
+fi
 
 [ "${found}" -eq 1 ] || printf 'No supported harness found; rerun %s --configure-only after installing one\n' "$0"

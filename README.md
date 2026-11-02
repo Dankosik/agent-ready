@@ -279,6 +279,21 @@ The installers preserve existing configuration and update only the block
 between the `agent-ready:start` and `agent-ready:end` markers. Cursor hooks and
 MCP configuration are merged instead of replaced.
 
+Each managed block starts with a `<!-- agent-ready vX.Y.Z sha256:… -->` line
+that records the release which wrote it and fingerprints the block. If you edit
+inside the markers, the next run stops before changing any file and names it;
+move the edit outside the markers, or rerun with `--force` to replace the
+block. `--dry-run` performs the same detection and checks and reports
+`would add`, `would refresh`, `unchanged`, or `blocked` for every target
+without installing tools, invoking `rtk` or `codegraph`, or modifying any file.
+The installer also records the agents, languages, tool method, and version it
+configured in `~/.config/agent-ready/receipt` (or under `$XDG_CONFIG_HOME`).
+
+Release archives are checked against the SHA-256 digest GitHub records for the
+`agent-ready-vX.Y.Z.tar.gz` asset before anything inside them runs, and a release
+that publishes no such asset is refused. When `gh` is installed and signed in,
+the build provenance of the archive is verified too.
+
 Run the same command again whenever you want to refresh the managed
 configuration. Installed tools are not upgraded unless you pass `--upgrade`;
 with release binaries, `--upgrade` downloads only the tools that have a newer
@@ -294,6 +309,108 @@ To explicitly upgrade the generic tools:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- --upgrade
 ```
+
+## Update
+
+`agent-ready update` moves the installed command and the configuration it
+manages to the newest release, repeating the install recorded in the receipt:
+
+```bash
+agent-ready update           # newest release that is at least 24 hours old
+agent-ready update --check   # only report; exits 10 when an update is available
+agent-ready update vX.Y.Z    # an explicit release, including a downgrade
+```
+
+It repeats the receipt's agents, languages, and tool mode, so an agent you did
+not select is never configured and a configure-only install stays
+configure-only. Tools are not upgraded unless you pass `--upgrade-tools`.
+`--dry-run` runs the new release's installer in dry-run mode and writes
+nothing, and `--force` is passed through for a block whose local edits would
+otherwise stop the update.
+
+A release is only offered once its archive has been published for 24 hours, so
+a broken release can be withdrawn before anyone updates to it; set
+`AGENT_READY_MIN_RELEASE_AGE` to a number of hours to change that, or to `0` to
+take the newest release immediately. The archive is verified against the
+SHA-256 digest GitHub records before anything inside it runs. An install from
+v1.3.0 or earlier has no receipt; `update` then assumes automatic agent
+detection and reads the tool mode from the machine, and says so.
+
+After the update, start a new agent session to load the updated instructions.
+`agent-ready rollback` returns to the previous release when the update is not
+what you wanted.
+
+## Uninstall
+
+`agent-ready uninstall` removes the configuration agent-ready wrote and nothing
+else:
+
+```bash
+agent-ready uninstall           # remove managed configuration and state
+agent-ready uninstall --dry-run # report the plan and change nothing
+agent-ready uninstall --force   # remove a block that has local edits
+```
+
+It targets every agent in the receipt's `configured` list or, without a receipt,
+every instruction file that still carries agent-ready markers. For each one it
+removes only the block between `agent-ready:start` and `agent-ready:end`; Cursor
+loses only its entry in `~/.cursor/hooks.json` and
+`~/.cursor/hooks/agent-ready-session-start.json`. It then removes the receipt,
+`~/.config/agent-ready/languages/`, the launcher only when it is agent-ready's
+own symlink, and `~/.local/share/agent-ready/versions/`. A file agent-ready
+created is left in place (empty) rather than deleted, and a block with local
+edits stops the run and is named unless you pass `--force`.
+
+Installed tools are not removed. The command lists what is still installed and
+prints the exact removal commands, including `rtk init -g --uninstall` for the
+RTK integration and `codegraph uninstall` for the CodeGraph MCP wiring; those
+belong to those tools. The `binaries` and `codegraph` state files stay while the
+tools they describe are installed. From a checkout, `./install.sh --uninstall`
+does the same.
+
+## The `agent-ready` command
+
+Installing from a release also leaves a local `agent-ready` command, laid out
+like the CodeGraph bundle: every version keeps its own tree, and only a launcher
+is on `PATH`.
+
+```text
+${XDG_DATA_HOME:-$HOME/.local/share}/agent-ready/versions/vX.Y.Z/
+${AGENT_READY_BIN_DIR:-$HOME/.local/bin}/agent-ready -> .../versions/vX.Y.Z/agent-ready
+```
+
+An install keeps the version it installed and the one before it and removes
+older trees. A launcher you already have is kept unless this installer created
+it. The command takes the same arguments as the bootstrap, without downloading
+anything:
+
+```bash
+agent-ready                        # install with automatic detection
+agent-ready codex                  # configure one agent
+agent-ready --agent claude,codex   # configure a comma list
+agent-ready language go            # add Go support
+agent-ready status                 # tree, launcher, receipt, and drift
+agent-ready doctor                 # ok/problem for the install and every tool
+agent-ready rollback               # reinstall the newest kept older release
+agent-ready uninstall              # remove only what agent-ready wrote
+```
+
+`status` prints the installed version, the launcher target, the receipt fields,
+the kept versions, and what this tree's installer would change. The drift check
+repeats the receipt's agents as one `--agent` list and the receipt's tool mode,
+so a machine installed with `--configure-only` is compared with `--configure-only`.
+`doctor` reports each check as `ok` or `problem` and exits non-zero when
+anything fails; `mdq` is only warned about because upstream publishes no arm64
+Linux build. Neither `status` nor `doctor` writes anything or uses the network.
+
+`rollback` is offline too. It finds the newest kept version below the receipt's
+and reruns that tree's installer with the receipt's agents, so the managed
+blocks and the receipt go back to that release; because an install keeps only
+two versions, it can go back one release.
+
+The local command appears after an install from a release. A checkout, a
+development ref, or an `AGENT_READY_ARCHIVE_URL` archive runs the requested
+install but does not install the command.
 
 ## Verify
 

@@ -1,0 +1,729 @@
+#!/usr/bin/env bash
+# agent-ready — the local command installed from a verified release.
+#
+# It owns the dispatch bootstrap.sh used to perform, and adds the verified
+# self-update, the read-only status and doctor views, an offline rollback, and an
+# uninstall that removes only what it wrote. A
+# verified release installs its own tree under
+# ~/.local/share/agent-ready/versions/ and links only this launcher onto PATH,
+# the way the CodeGraph bundle does; a tree deleted there is replaced by the
+# next install, and a file agent-ready did not create is never replaced.
+
+set -euo pipefail
+
+usage() {
+	printf 'usage: %s [agent <name>|language <name>|<agent>] [installer options]\n' "$0" >&2
+	printf '       %s status|doctor|rollback|update|uninstall\n' "$0" >&2
+}
+
+die() {
+	printf '%s\n' "$*" >&2
+	exit 1
+}
+
+# Follow symlinks the way the launcher is expected to, so the script knows the
+# tree it was installed from.
+resolve_path() {
+	local path="$1" link dir hops=0
+	while [ -L "${path}" ]; do
+		hops=$((hops + 1))
+		[ "${hops}" -le 20 ] || return 1
+		link=$(readlink "${path}")
+		case "${link}" in
+		/*) path="${link}" ;;
+		*)
+			dir=$(cd -- "$(dirname -- "${path}")" && pwd -P) || return 1
+			path="${dir}/${link}"
+			;;
+		esac
+	done
+	printf '%s\n' "${path}"
+}
+
+script="${BASH_SOURCE[0]:-$0}"
+script=$(resolve_path "${script}") || die "cannot resolve ${script}"
+root=$(cd -- "$(dirname -- "${script}")" && pwd)
+
+bin_dir="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}"
+versions_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-ready/versions"
+launcher="${bin_dir}/agent-ready"
+
+release_api="${AGENT_READY_GITHUB_API:-https://api.github.com}"
+release_repo=Dankosik/agent-ready
+
+# Same download and token rule as bootstrap.sh: the token only ever goes to the
+# real GitHub API, never to an override.
+fetch() {
+	local url="$1" out="$2" code token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+	local auth=()
+	case "${url}" in
+	https://api.github.com/*) [ -z "${token}" ] || auth=(-H "Authorization: Bearer ${token}") ;;
+	esac
+	code=$(curl -sSL --retry 3 ${auth[@]+"${auth[@]}"} -w '%{http_code}' -o "${out}" "${url}") ||
+		die "download failed: ${url}"
+	case "${code}" in
+	200 | 000) ;;
+	403 | 429) die "GitHub API rate limit reached; set GITHUB_TOKEN or retry later (${url})" ;;
+	*) die "download failed with HTTP ${code}: ${url}" ;;
+	esac
+}
+
+# Assigned by lib/receipt.sh when a receipt is read.
+receipt_version=
+receipt_agents=
+receipt_configured=
+receipt_languages=
+receipt_tools=
+receipt_updated_at=
+# shellcheck source=lib/receipt.sh
+# shellcheck disable=SC1091
+. "${root}/lib/receipt.sh"
+
+version=$(cat "${root}/VERSION" 2>/dev/null || true)
+receipt_valid_version "${version}" || die "missing or invalid ${root}/VERSION"
+
+selectors='claude claude-code codex cursor cursor-agent gemini gemini-cli copilot github-copilot windsurf grok grok-build opencode open-code qwen qwen-code cline kilo kilocode kilo-code crush goose'
+
+is_selector() {
+	case " ${selectors} " in
+	*" $1 "*) return 0 ;;
+	esac
+	return 1
+}
+
+# Strictly lower semver. Numbers are compared, not strings, so v1.10.0 is above
+# v1.9.0 and cannot be pruned as "older".
+version_lt() {
+	awk -v a="$1" -v b="$2" 'BEGIN {
+		split(substr(a, 2), x, ".")
+		split(substr(b, 2), y, ".")
+		for (i = 1; i <= 3; i++) {
+			if (x[i] + 0 < y[i] + 0) exit 0
+			if (x[i] + 0 > y[i] + 0) exit 1
+		}
+		exit 1
+	}'
+}
+
+kept_versions() {
+	local dir names=
+	for dir in "${versions_dir}"/v*; do
+		[ -d "${dir}" ] || continue
+		receipt_valid_version "${dir##*/}" || continue
+		names="${names} ${dir##*/}"
+	done
+	if [ -z "${names}" ]; then
+		printf 'none\n'
+	else
+		printf '%s\n' "${names# }"
+	fi
+}
+
+# The launcher belongs to agent-ready only when it resolves inside the versions
+# directory; anything else was put there by someone else.
+launcher_owned() {
+	local target
+	[ -L "${launcher}" ] || return 1
+	target=$(resolve_path "${launcher}") || return 1
+	case "${target}" in
+	"${versions_dir}"/*) return 0 ;;
+	esac
+	return 1
+}
+
+# Same-directory temporary symlink plus an atomic move, so the launcher is
+# never missing while it is replaced.
+link_launcher() {
+	local dir="$1" tmp
+	mkdir -p "${bin_dir}"
+	tmp=$(mktemp "${bin_dir}/.agent-ready.XXXXXX")
+	rm -f "${tmp}"
+	ln -s "${dir}/agent-ready" "${tmp}"
+	mv -f "${tmp}" "${launcher}"
+}
+
+# The receipt already records the canonical comma list, so a repeat install
+# passes it as one --agent value; auto repeats the detection this run would do.
+repeat_args=()
+receipt_agent_args() {
+	repeat_args=()
+	[ -n "${receipt_agents}" ] || return 0
+	[ "${receipt_agents}" != auto ] || return 0
+	repeat_args=(--agent "${receipt_agents}")
+}
+
+# Match the tool mode the receipt records. A configure-only install keeps the
+# tools it has, so its drift must not assume a tool install would change blocks.
+dry_run() {
+	receipt_agent_args
+	if [ -z "${receipt_tools}" ] || [ "${receipt_tools}" = none ]; then
+		bash "${root}/install.sh" --configure-only --dry-run ${repeat_args[@]+"${repeat_args[@]}"}
+	else
+		bash "${root}/install.sh" --dry-run ${repeat_args[@]+"${repeat_args[@]}"}
+	fi
+}
+
+launcher_line() {
+	if [ -L "${launcher}" ]; then
+		printf 'launcher: %s -> %s\n' "${launcher}" "$(readlink "${launcher}")"
+	elif [ -e "${launcher}" ]; then
+		printf 'launcher: %s (not a symlink)\n' "${launcher}"
+	else
+		printf 'launcher: %s (missing)\n' "${launcher}"
+	fi
+}
+
+receipt_fields() {
+	printf '  version=%s\n' "${receipt_version}"
+	printf '  agents=%s\n' "${receipt_agents}"
+	printf '  configured=%s\n' "${receipt_configured}"
+	printf '  languages=%s\n' "${receipt_languages}"
+	printf '  tools=%s\n' "${receipt_tools}"
+	printf '  updated_at=%s\n' "${receipt_updated_at}"
+}
+
+# Read-only: never installs, never rewrites the receipt, never touches the
+# network. A malformed receipt is reported here and the drift view still runs.
+status() {
+	local receipt
+	printf 'agent-ready %s: %s\n' "${version}" "${root}"
+	launcher_line
+	receipt=$(receipt_path)
+	if [ -f "${receipt}" ]; then
+		printf 'receipt: %s\n' "${receipt}"
+		if receipt_read "${receipt}" 2>/dev/null; then
+			receipt_fields
+		else
+			printf '  malformed\n'
+		fi
+	else
+		printf 'no receipt (installed before v1.4.0 or not installed)\n'
+	fi
+	printf 'versions: %s\n' "$(kept_versions)"
+	printf 'drift:\n'
+	dry_run || true
+	return 0
+}
+
+doctor_failed=0
+doctor_ok() { printf 'ok: %s\n' "$*"; }
+doctor_problem() {
+	doctor_failed=1
+	printf 'problem: %s\n' "$*"
+}
+
+# Read-only diagnostic: every line is ok or problem, and any problem makes the
+# exit status non-zero because the install cannot be trusted to be complete.
+doctor() {
+	local receipt tools tool target out dry_status=0
+	doctor_failed=0
+	tools='rtk rg ast-grep sd uv jq yq gh wt difft gitleaks actionlint shellcheck hyperfine codegraph'
+	receipt=$(receipt_path)
+	if [ -f "${receipt}" ]; then
+		if receipt_read "${receipt}" 2>/dev/null; then
+			doctor_ok "receipt ${receipt}"
+		else
+			doctor_problem "malformed receipt ${receipt}"
+		fi
+	else
+		doctor_ok 'no receipt (installed before v1.4.0 or not installed)'
+	fi
+	if [ -L "${launcher}" ]; then
+		target=$(resolve_path "${launcher}" || true)
+		case "${target}" in
+		"${versions_dir}"/*)
+			if [ -e "${target}" ]; then
+				doctor_ok "launcher ${launcher} -> ${target}"
+			else
+				doctor_problem "launcher ${launcher} -> ${target}: target is missing"
+			fi
+			;;
+		*) doctor_problem "launcher ${launcher} is not installed by agent-ready" ;;
+		esac
+	elif [ -e "${launcher}" ]; then
+		doctor_problem "launcher ${launcher} is not installed by agent-ready"
+	else
+		doctor_problem "launcher ${launcher} is missing"
+	fi
+	case ":${PATH}:" in
+	*":${bin_dir}:"*) doctor_ok "${bin_dir} is on PATH" ;;
+	*) doctor_problem "${bin_dir} is not on PATH" ;;
+	esac
+	for tool in ${tools}; do
+		if command -v "${tool}" >/dev/null 2>&1; then
+			doctor_ok "${tool} on PATH"
+		else
+			doctor_problem "${tool} is not on PATH"
+		fi
+	done
+	# mdq publishes no arm64 Linux build, so it stays optional.
+	command -v mdq >/dev/null 2>&1 ||
+		printf 'warn: mdq is not on PATH (optional; upstream publishes no arm64 Linux build)\n'
+	out=$(dry_run 2>&1) || dry_status=$?
+	if [ "${dry_status}" -eq 0 ] && ! printf '%s\n' "${out}" | grep -qF 'blocked'; then
+		doctor_ok 'install.sh --dry-run reports nothing blocked'
+	else
+		doctor_problem 'install.sh --dry-run reports a blocked target'
+	fi
+	[ "${doctor_failed}" -eq 0 ]
+}
+
+# Offline downgrade: the receipt names the current version, and the highest kept
+# version below it is reinstalled with the receipt's own agents.
+rollback() {
+	local receipt dir name target=
+	receipt=$(receipt_path)
+	[ -f "${receipt}" ] ||
+		die 'no receipt: nothing to roll back from (installed before v1.4.0 or not installed)'
+	receipt_read "${receipt}" || exit 1
+	for dir in "${versions_dir}"/v*; do
+		[ -d "${dir}" ] || continue
+		name="${dir##*/}"
+		receipt_valid_version "${name}" || continue
+		version_lt "${name}" "${receipt_version}" || continue
+		if [ -z "${target}" ] || version_lt "${target}" "${name}"; then
+			target="${name}"
+		fi
+	done
+	if [ -z "${target}" ]; then
+		printf 'no earlier version is kept; run agent-ready update %s\n' "${receipt_version}" >&2
+		exit 1
+	fi
+	if [ -e "${launcher}" ] || [ -L "${launcher}" ]; then
+		launcher_owned ||
+			die "refusing to replace ${launcher}; it was not installed by agent-ready"
+	fi
+	printf 'Rolling back to agent-ready %s\n' "${target}"
+	receipt_agent_args
+	bash "${versions_dir}/${target}/install.sh" --configure-only ${repeat_args[@]+"${repeat_args[@]}"}
+	link_launcher "${versions_dir}/${target}"
+	printf 'agent-ready %s is now the launcher default\n' "${target}"
+}
+
+# The receipt records what an update repeats. Without one (installed by v1.3.0
+# or earlier) only the machine is left to read: auto detection and the tool mode.
+load_state() {
+	local file
+	file=$(receipt_path)
+	if [ -f "${file}" ]; then
+		receipt_read "${file}" || exit 1
+		return 0
+	fi
+	receipt_version=
+	receipt_agents=auto
+	receipt_configured=
+	receipt_languages=
+	receipt_tools=$(receipt_legacy_tools)
+	receipt_updated_at=
+}
+
+# ISO-8601 cutoff for the minimum release age, so the comparison against
+# published_at is a plain string compare. GNU date takes -d, BSD date -r.
+release_cutoff() {
+	local age="$1" now secs
+	now=$(date -u +%s)
+	secs=$((now - age * 3600))
+	date -u -d "@${secs}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
+		date -u -r "${secs}" +%Y-%m-%dT%H:%M:%SZ
+}
+
+# The newest stable release that publishes the verified archive and has aged
+# past AGENT_READY_MIN_RELEASE_AGE hours, so a broken release can be withdrawn
+# before anyone updates to it. GitHub lists releases newest first.
+latest_release() {
+	local list="$1" age="${AGENT_READY_MIN_RELEASE_AGE:-24}" cutoff='' tag
+	[[ "${age}" =~ ^[0-9]+$ ]] ||
+		die "AGENT_READY_MIN_RELEASE_AGE must be a whole number of hours, not ${age}"
+	if [ "${age}" -gt 0 ]; then
+		cutoff=$(release_cutoff "${age}") ||
+			die 'could not compute the minimum release age cutoff'
+	fi
+	command -v jq >/dev/null 2>&1 || die 'jq is required to resolve the newest release'
+	fetch "${release_api}/repos/${release_repo}/releases?per_page=30" "${list}"
+	# shellcheck disable=SC2016 # $r and $cutoff are jq variables
+	tag=$(jq -r --arg cutoff "${cutoff}" '
+		[
+			.[]
+			| select((.draft // false) == false and (.prerelease // false) == false)
+			| . as $r
+			| select($cutoff == "" or (($r.published_at // "") != "" and $r.published_at <= $cutoff))
+			| select(any($r.assets[]?; .name == ("agent-ready-" + $r.tag_name + ".tar.gz")))
+			| $r.tag_name
+		][0] // empty
+	' "${list}") || die "cannot read the release list from ${release_api}"
+	[ -n "${tag}" ] ||
+		die "no agent-ready release with a verified archive is eligible (minimum age ${age}h); retry later or name a version"
+	receipt_valid_version "${tag}" || die "unexpected release tag: ${tag}"
+	printf '%s\n' "${tag}"
+}
+
+# Cosmetic: a failed notes request must not turn a finished update into an
+# error, and must not hide the session hint.
+print_release_notes() {
+	local tag="$1" json="$2" body
+	printf 'Release notes: https://github.com/%s/releases/tag/%s\n' "${release_repo}" "${tag}"
+	if fetch "${release_api}/repos/${release_repo}/releases/tags/${tag}" "${json}" 2>/dev/null &&
+		body=$(jq -r '.body // empty' "${json}" 2>/dev/null) && [ -n "${body}" ]; then
+		printf '%s\n' "${body}" | awk 'NR <= 15'
+	fi
+	printf 'Start a new agent session to load the updated instructions.\n'
+}
+
+# Migrations are ordered by version, not filename, so v1.10.0 runs after v1.9.0;
+# the version is the part before the first dash. A failure stops the update
+# before install, leaving the current install untouched.
+run_migrations() {
+	local from="$1" dir="${root}/migrations" name mig sorted
+	[ -d "${dir}" ] || return 0
+	sorted=$(
+		cd "${dir}" || exit 1
+		for name in v*.sh; do
+			if [ -f "${name}" ] && [ -x "${name}" ]; then
+				printf '%s\n' "${name}"
+			fi
+		done |
+			awk -F'[.-]' '{ printf "%08d %08d %08d %s\n", $2, $3, $4, $0 }' |
+			sort | cut -d' ' -f4-
+	) || die "cannot read migrations in ${dir}"
+	while IFS= read -r name; do
+		[ -n "${name}" ] || continue
+		mig="${name#v}"
+		mig="v${mig%%-*}"
+		receipt_valid_version "${mig}" || die "invalid migration name: ${dir}/${name}"
+		if [ "${from}" != none ]; then
+			[ "${mig}" != "${from}" ] || continue
+			if version_lt "${mig}" "${from}"; then
+				continue
+			fi
+		fi
+		if version_lt "${version}" "${mig}"; then
+			continue
+		fi
+		printf 'Running migration %s\n' "${name}"
+		bash "${dir}/${name}" || die "migration ${name} failed; agent-ready was not updated"
+	done <<<"${sorted}"
+}
+
+# One install run with the receipt's agents and tool mode; --upgrade only when
+# asked, because an update must not move tools the user did not ask to move.
+apply_install() {
+	local upgrade="$1" force_install="$2" os
+	local -a args
+	receipt_agent_args
+	args=(${repeat_args[@]+"${repeat_args[@]}"})
+	case "${receipt_tools}" in
+	none)
+		[ "${upgrade}" -eq 0 ] ||
+			die '--upgrade-tools needs a tool install, but the receipt records tools=none'
+		args+=(--configure-only)
+		;;
+	binaries)
+		os="${AGENT_READY_OS:-$(uname -s)}"
+		[ "${os}" = Linux ] || args+=(--binaries)
+		;;
+	esac
+	[ "${upgrade}" -eq 0 ] || args+=(--upgrade)
+	[ "${force_install}" -eq 0 ] || args+=(--force)
+	bash "${root}/install.sh" ${args[@]+"${args[@]}"}
+}
+
+# Internal: runs inside the downloaded tree, so migrations and the install use
+# the code that release ships. The receipt is read again because only this
+# tree's install.sh writes it.
+apply_update() {
+	local from=none dry=0 upgrade=0 force_install=0
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--from)
+			[ "$#" -ge 2 ] || die 'apply-update: --from needs a version'
+			from="$2"
+			shift
+			;;
+		--dry-run) dry=1 ;;
+		--upgrade-tools) upgrade=1 ;;
+		--force) force_install=1 ;;
+		*) die "apply-update: unknown argument: $1" ;;
+		esac
+		shift
+	done
+	if [ "${from}" != none ]; then
+		receipt_valid_version "${from}" || die "apply-update: invalid --from: ${from}"
+	fi
+	load_state
+	if [ "${dry}" -eq 1 ]; then
+		dry_run
+		return
+	fi
+	run_migrations "${from}"
+	apply_install "${upgrade}" "${force_install}"
+	apply_languages
+}
+
+# Each language installer re-applies the base configuration itself, but its
+# automatic mode re-detects every agent on PATH. An explicit receipt is
+# therefore repeated one agent at a time, so an update never configures an
+# agent the user did not select; a language with no setup for that agent exits
+# 2 and is skipped, while the routing step 4 wrote for it stays.
+apply_languages() {
+	local rest="${receipt_languages}," name agent installer status
+	while [ -n "${rest}" ]; do
+		name="${rest%%,*}"
+		rest="${rest#*,}"
+		[ -n "${name}" ] || continue
+		installer="${root}/languages/${name}/install.sh"
+		[ -f "${installer}" ] || die "unsupported language in the receipt: ${name}"
+		if [ -z "${receipt_agents}" ] || [ "${receipt_agents}" = auto ]; then
+			bash "${installer}" --configure-only
+			continue
+		fi
+		for agent in ${receipt_agents//,/ }; do
+			status=0
+			bash "${installer}" --configure-only --agent "${agent}" || status=$?
+			case "${status}" in
+			0) ;;
+			2) printf '%s: no %s-specific setup; its routing block still applies\n' "${name}" "${agent}" >&2 ;;
+			*) die "language ${name} failed for ${agent}; the base configuration is updated but the launcher was not moved" ;;
+			esac
+		done
+	done
+}
+
+# Install the newest verified release by repeating this install in the tree that
+# release ships. bootstrap.sh downloads, verifies, and self-installs that tree;
+# this command only picks the version and passes the receipt's choices along.
+# The lock and the work directory are global because the EXIT trap outlives this
+# function's locals.
+update_work=
+update_lock=
+cleanup_update() {
+	[ -z "${update_work}" ] || rm -rf "${update_work}"
+	[ -z "${update_lock}" ] || rmdir "${update_lock}" 2>/dev/null || true
+}
+update() {
+	local cur target='' explicit='' check=0 dry=0 upgrade=0 force_install=0 config
+	local -a args
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		--check) check=1 ;;
+		--dry-run) dry=1 ;;
+		--upgrade-tools) upgrade=1 ;;
+		--force) force_install=1 ;;
+		v*)
+			[ -z "${explicit}" ] || die 'update: name at most one version'
+			explicit="$1"
+			;;
+		*)
+			usage
+			exit 2
+			;;
+		esac
+		shift
+	done
+	[ -z "${explicit}" ] || receipt_valid_version "${explicit}" ||
+		die "update: invalid version: ${explicit}"
+
+	config=$(dirname -- "$(receipt_path)")
+	mkdir -p "${config}" || die "cannot create ${config}"
+	update_lock="${config}/update.lock"
+	mkdir "${update_lock}" 2>/dev/null ||
+		die "another agent-ready update is running (remove ${update_lock} if it is stale)"
+	trap cleanup_update EXIT
+	update_work=$(mktemp -d)
+
+	load_state
+	cur="${receipt_version:-none}"
+	if [ -z "${receipt_version}" ]; then
+		printf 'No receipt: assuming agents=auto and tools=%s (installed before v1.4.0)\n' "${receipt_tools}"
+	fi
+	if [ -n "${explicit}" ]; then
+		target="${explicit}"
+	else
+		target=$(latest_release "${update_work}/releases.json")
+	fi
+
+	# A named version is allowed to be older (a downgrade); an unnamed one is
+	# only ever an update, so anything not newer means nothing to do.
+	if [ "${cur}" != none ] && [ "${target}" = "${cur}" ]; then
+		printf 'agent-ready %s is up to date\n' "${cur}"
+		return 0
+	fi
+	if [ "${cur}" != none ] && [ -z "${explicit}" ] && version_lt "${target}" "${cur}"; then
+		printf 'agent-ready %s is up to date\n' "${cur}"
+		return 0
+	fi
+	if [ "${check}" -eq 1 ]; then
+		printf 'agent-ready %s → %s available\n' "${cur}" "${target}"
+		exit 10
+	fi
+
+	if [ "${cur}" != none ] && [ -n "${explicit}" ] && version_lt "${target}" "${cur}"; then
+		printf 'Downgrading agent-ready %s → %s\n' "${cur}" "${target}"
+	else
+		printf 'Updating agent-ready %s → %s\n' "${cur}" "${target}"
+	fi
+	args=(apply-update --from "${cur}")
+	[ "${dry}" -eq 0 ] || args+=(--dry-run)
+	[ "${upgrade}" -eq 0 ] || args+=(--upgrade-tools)
+	[ "${force_install}" -eq 0 ] || args+=(--force)
+	# The ref makes bootstrap fetch the target release instead of rerunning this
+	# tree; the API override travels with it so both resolve against the same one.
+	AGENT_READY_REF="${target}" AGENT_READY_GITHUB_API="${release_api}" \
+		bash "${root}/bootstrap.sh" "${args[@]}"
+	print_release_notes "${target}" "${update_work}/target.json"
+}
+
+# Keep the version just installed and the next lower one, and drop what is older
+# than both. Anything above the installed version is left alone, so installing
+# an older release never deletes a newer one, and nothing outside versions/ is
+# ever removed.
+prune_versions() {
+	local installed="$1" dir name lower=
+	for dir in "${versions_dir}"/v*; do
+		[ -d "${dir}" ] || continue
+		name="${dir##*/}"
+		receipt_valid_version "${name}" || continue
+		version_lt "${name}" "${installed}" || continue
+		if [ -z "${lower}" ] || version_lt "${lower}" "${name}"; then
+			lower="${name}"
+		fi
+	done
+	[ -n "${lower}" ] || return 0
+	for dir in "${versions_dir}"/v*; do
+		[ -d "${dir}" ] || continue
+		name="${dir##*/}"
+		receipt_valid_version "${name}" || continue
+		version_lt "${name}" "${lower}" || continue
+		rm -rf -- "${dir}"
+	done
+}
+
+# Copy this verified tree beside the versions already installed and point the
+# launcher at it. Only the versions directory and the launcher are written; the
+# receipt is the one install.sh already wrote.
+self_install_tree() {
+	local dest stage owned=1
+	mkdir -p "${versions_dir}" "${bin_dir}"
+	dest="${versions_dir}/${version}"
+	if [ -d "${dest}" ] && cmp -s "${root}/agent-ready" "${dest}/agent-ready" &&
+		cmp -s "${root}/VERSION" "${dest}/VERSION"; then
+		printf 'agent-ready %s is already in %s\n' "${version}" "${dest}"
+	else
+		stage=$(mktemp -d "${versions_dir}/.${version}.XXXXXX")
+		cp -R "${root}/." "${stage}/" || {
+			rm -rf "${stage}"
+			die "could not copy ${root}"
+		}
+		rm -rf "${stage}/.git"
+		if [ -e "${dest}" ] || [ -L "${dest}" ]; then
+			rm -rf "${dest}"
+		fi
+		mv "${stage}" "${dest}"
+		printf 'agent-ready %s installed in %s\n' "${version}" "${dest}"
+	fi
+	if [ -e "${launcher}" ] || [ -L "${launcher}" ]; then
+		launcher_owned || owned=0
+	fi
+	if [ "${owned}" -eq 1 ]; then
+		link_launcher "${dest}"
+	else
+		printf 'agent-ready: keeping the existing %s; it was not installed by agent-ready\n' "${launcher}"
+	fi
+	prune_versions "${version}"
+	if [ "${owned}" -eq 0 ]; then
+		return 0
+	fi
+	case ":${PATH}:" in
+	*":${bin_dir}:"*) ;;
+	*) # shellcheck disable=SC2016 # $PATH is printed literally for the profile
+		printf '\n%s is not on PATH. Add this to your shell profile:\n  export PATH="%s:$PATH"\n' "${bin_dir}" "${bin_dir}" ;;
+	esac
+}
+
+dispatch() {
+	local agent_name language installer
+	case "${1:-}" in
+	"")
+		bash "${root}/install.sh"
+		;;
+	agent)
+		[ "$#" -ge 2 ] || { usage; exit 2; }
+		agent_name="$2"
+		shift 2
+		bash "${root}/install.sh" --agent "${agent_name}" "$@"
+		;;
+	language)
+		[ "$#" -ge 2 ] || { usage; exit 2; }
+		language="$2"
+		shift 2
+		case "${language}" in
+		"" | *[!a-z0-9_-]*) printf 'unsupported language: %s\n' "${language}" >&2; exit 2 ;;
+		esac
+		installer="${root}/languages/${language}/install.sh"
+		[ -f "${installer}" ] || { printf 'unsupported language: %s\n' "${language}" >&2; exit 2; }
+		bash "${installer}" "$@"
+		;;
+	status)
+		shift
+		status
+		;;
+	doctor)
+		shift
+		doctor
+		;;
+	rollback)
+		shift
+		rollback
+		;;
+	update)
+		shift
+		update "$@"
+		;;
+	uninstall)
+		shift
+		bash "${root}/install.sh" --uninstall "$@"
+		;;
+	apply-update)
+		# Internal: bootstrap.sh hands this to the tree it just verified.
+		shift
+		apply_update "$@"
+		;;
+	--agent | --configure-only | --upgrade | --binaries)
+		bash "${root}/install.sh" "$@"
+		;;
+	*)
+		if is_selector "$1"; then
+			agent_name="$1"
+			shift
+			bash "${root}/install.sh" --agent "${agent_name}" "$@"
+		else
+			usage
+			exit 2
+		fi
+		;;
+	esac
+}
+
+# --self-install is internal: bootstrap.sh passes it only for a verified release
+# archive, so only such a tree is copied beside the launchable versions.
+self_install=0
+if [ "${1:-}" = --self-install ]; then
+	self_install=1
+	shift
+fi
+# These commands manage or inspect an existing install; they never self-install.
+case "${1:-}" in
+status | doctor | rollback | uninstall) self_install=0 ;;
+esac
+# apply-update --dry-run changes nothing, so it must not be self-installed
+# either; a real update always reaches it with --self-install.
+if [ "${1:-}" = apply-update ]; then
+	for arg in "$@"; do
+		[ "${arg}" != --dry-run ] || self_install=0
+	done
+fi
+
+dispatch "$@"
+
+if [ "${self_install}" -eq 1 ]; then
+	self_install_tree
+fi
