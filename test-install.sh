@@ -1523,6 +1523,13 @@ rg -qF 'agent-ready v9.9.1 is up to date' "${work}/min-age.out"
 [ "$(readlink "${age_bins}/agent-ready")" = \
 	"${age_home}/.local/share/agent-ready/versions/v9.9.1/agent-ready" ]
 
+# With every release inside the minimum age there is nothing newer to offer:
+# up to date, and --check exits 0 rather than failing.
+run_update "${age_home}" "${age_bins}" 1000 >"${work}/min-age-none.out"
+rg -qF 'agent-ready v9.9.1 is up to date' "${work}/min-age-none.out"
+run_update "${age_home}" "${age_bins}" 1000 --check >"${work}/min-age-none.out"
+rg -qF 'agent-ready v9.9.1 is up to date' "${work}/min-age-none.out"
+
 # An explicit older release is a downgrade, and it is applied.
 run_update "${update_home}" "${update_bins}" 0 v9.9.1 >"${work}/update.out"
 rg -qF 'Downgrading agent-ready v9.9.2 → v9.9.1' "${work}/update.out"
