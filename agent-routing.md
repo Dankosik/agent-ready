@@ -1,6 +1,6 @@
 Tool routing (use instead of defaults):
 - Shell: prefix commands with `rtk`; `rtk bypass <cmd>` for unfiltered output.
-- Search: `rg` text, `rg --files` files; code structure (calls, declarations, loops, branches): `ast-grep run -l <lang> -p '<pattern>'` (`$X` matches any node), even where a regex fits.
+- Search: `rg` text, `rg --files` files; code structure (calls, declarations, loops, branches): `ast-grep run -l <lang> -p '<pattern>'` (`$X` matches any node; add `-r '<new>' -U` to rewrite), even where a regex fits.
 - Edit: `sd -F 'old' 'new' <file>` (literal, in place; drop `-F` for regex); temporary Python deps: `uv run --with <pkg>`.
 - Data: `jq` JSON, `yq` YAML/TOML/XML, `gh api --jq` GitHub.
 - Worktrees: `wt list` first, then Worktrunk (`wt switch -c <branch>`); `wt <cmd> --help` before mutating.
