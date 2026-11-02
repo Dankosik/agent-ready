@@ -1,12 +1,18 @@
 <h1 align="center">agent-ready</h1>
 
-<p align="center"><strong>Reliable command-line tools for AI coding agents on macOS and Linux.</strong></p>
+<p align="center"><strong>Give AI coding agents the right command-line tools, and teach them when to use each one.</strong></p>
+
+<p align="center">
+  One command sets up Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI,
+  Windsurf, and seven more agents on macOS, Linux, and WSL2.
+</p>
 
 <p align="center">
   <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-blue">
-  <img alt="platform macOS and Linux" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey">
+  <img alt="platform macOS, Linux, and WSL2" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL2-lightgrey">
   <a href="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="17 generic tools" src="https://img.shields.io/badge/generic_tools-17-brightgreen">
+  <img alt="13 supported agents" src="https://img.shields.io/badge/agents-13-brightgreen">
 </p>
 
 <p align="center">
@@ -15,14 +21,39 @@
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
-  <a href="#install-for-one-agent">Agents</a> ·
-  <a href="#go-support">Go</a> ·
+  <a href="#what-gets-added-to-agentsmd">AGENTS.md example</a> ·
+  <a href="#supported-agents">Agents</a> ·
   <a href="#whats-installed">Tools</a> ·
-  <a href="#verify">Verify</a>
+  <a href="#go-support">Go</a> ·
+  <a href="#update">Update</a> ·
+  <a href="#uninstall">Uninstall</a> ·
+  <a href="#faq">FAQ</a>
 </p>
 
-`agent-ready` installs a practical CLI toolkit and adds the instructions that
-help coding agents use it correctly.
+## What is agent-ready?
+
+AI coding agents work through the shell. Left alone, they reach for the
+commands they already know: `grep` instead of `rg`, `cat` on a whole file
+instead of reading one section, `sed` for structural code edits, raw build
+output that floods the context window. Installing better tools does not change
+that on its own; measured on real session transcripts, an agent keeps using
+its defaults unless something tells it otherwise.
+
+`agent-ready` does both halves of the job:
+
+1. **Installs a CLI toolkit for agents.** 17 language-independent tools for
+   search, structural edits, compact output, data, Git, code intelligence, and
+   local security checks (see [What's installed](#whats-installed)).
+2. **Teaches every agent to use it.** It writes a short, versioned block of
+   *tool routing* rules into each agent's global instruction file, such as
+   `~/.codex/AGENTS.md` or `~/.claude/CLAUDE.md`. Every new session starts with
+   those rules, so the agent picks `rg`, `ast-grep`, `jq`, or `codegraph` for
+   the right job. You can [read the exact block](#what-gets-added-to-agentsmd)
+   below.
+
+Everything outside that block stays yours. The installer preserves existing
+content, verifies every download, never uses `sudo`, and can be removed with
+one command.
 
 ## Quick start
 
@@ -39,20 +70,35 @@ On Debian or Ubuntu:
 sudo apt-get install -y curl ca-certificates xz-utils unzip
 ```
 
+Then run:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash
 ```
 
-That's it. The installer adds 17 language-independent tools and configures
-Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI, and Windsurf when it
-finds them. Start a new agent session after the command finishes.
+That's it. The installer adds the tools and configures every
+[supported agent](#supported-agents) it finds on this machine. Start a new agent
+session after the command finishes.
+
+What happens during that command:
+
+1. `bootstrap.sh` downloads the `v1.4.1` release archive and checks it against
+   the SHA-256 digest GitHub records before anything inside it runs.
+2. The installer detects which agents are on this machine.
+3. It installs missing tools (with Homebrew on macOS, from verified GitHub
+   release binaries on Linux). Tools you already have are not upgraded.
+4. It writes the routing block into each detected agent's instruction file and
+   wires the CodeGraph MCP server through `codegraph install`.
+5. It records what it configured in a receipt and leaves an
+   [`agent-ready` command](#the-agent-ready-command) for updates and removal.
 
 On macOS it also installs GNU coreutils, because agents call `timeout` by reflex
 and macOS has none. If no `timeout` is on your `PATH`, the installer links
 `~/.local/bin/timeout` to `gtimeout`; it never replaces a file already there.
 
-The command is pinned to the immutable `v1.4.1` release. Upgrade by choosing a
-newer release version in both places in the command.
+The command is pinned to the immutable `v1.4.1` release. Upgrade with
+[`agent-ready update`](#update), or by choosing a newer release version in both
+places in the command.
 
 > [!NOTE]
 > `agent-ready` configures coding agents but does not install them or sign in to
@@ -63,6 +109,107 @@ same WSL environment; native Windows is not supported.
 
 For best performance, keep repositories used by Linux agents in the WSL
 filesystem, such as `~/projects`, rather than under `/mnt/c`.
+
+## What gets added to AGENTS.md
+
+This is the exact block a `v1.4.1` install writes into an agent's global
+instruction file, here `~/.config/goose/AGENTS.md`. Codex gets the same block in
+`~/.codex/AGENTS.md`, Claude Code in `~/.claude/CLAUDE.md`, and so on (see
+[Supported agents](#supported-agents)). Nothing above or below the markers is
+touched.
+
+```markdown
+<!-- agent-ready:start -->
+<!-- agent-ready v1.4.1 sha256:9a75b89a66e657a538aadf5ab76459ab171e17201a53c5b78c176ca160b4189b -->
+Tool routing (use instead of defaults):
+- Shell: prefix commands with `rtk`; `rtk bypass <cmd>` for unfiltered output.
+- Builds/tests: don't pipe them into `tail`/`head`; the pipe exits 0 and cuts the failure. rtk already condenses cargo/go/pytest/vitest/tsc output; if you must trim, `set -o pipefail` first.
+- Literal multi-line edits: use your file-edit tool, which fails when the text is missing; a script's `str.replace` and `sd` silently change nothing, so check the match count.
+- Search: `rg` text, `rg --files` files; code structure (calls, declarations, loops, branches): `ast-grep run -l <lang> -p '<pattern>'` (`$X` matches any node; add `-r '<new>' -U` to rewrite), even where a regex fits.
+- Edit: `sd -F 'old' 'new' <file>` (literal, in place; drop `-F` for regex); temporary Python deps: `uv run --with <pkg>`.
+- Data: `jq` JSON, `yq` YAML/TOML/XML (`yq -i` edits these and JSON in place), `gh api --jq` GitHub.
+- Worktrees: `wt list` first, then Worktrunk (`wt switch -c <branch>`); `wt <cmd> --help` before mutating.
+- Read: `mdq '# <heading>' <file>` to read one section of a long Markdown file instead of all of it.
+- Diffs: when formatting noise may hide a logic change, `git -c diff.external='difft --display inline' diff` (without `rtk`).
+- Check: `shellcheck` shell, `actionlint` workflows, `gitleaks dir|git --redact .` files|history, `osv-scanner scan source -r .` vulnerable dependencies.
+- Timing: to compare commands, `hyperfine --warmup 3 '<a>' '<b>'`, not single `time` runs.
+- Code graph: index of symbols, calls, imports. With `.codegraph/`, first ask `codegraph_explore` (MCP) or `codegraph explore "<question>"` how code works, who calls what, what a change affects; its source is current, so do not re-read it, but a file marked changed since sync may have stale callers (`codegraph sync`). No index: normal routing; never `codegraph init` unasked.
+<!-- agent-ready:end -->
+```
+
+How to read it:
+
+- **Markers.** `agent-ready:start` and `agent-ready:end` fence the managed
+  block. Reruns, updates, and uninstall touch only what is between them.
+- **Header.** The second line records the release that wrote the block and a
+  SHA-256 fingerprint of its body. If you edit inside the markers, the next run
+  notices the mismatch and stops instead of overwriting your change.
+- **Rules.** One line per job: which tool to use, the one flag that matters,
+  and the trap it avoids. The full manuals stay in each tool's `--help`, where
+  they cost no context until needed.
+
+The block varies slightly by setup:
+
+- For Claude Code, Codex, Gemini CLI, and OpenCode, the `Code graph:` line is
+  left out when `codegraph` is installed, because CodeGraph writes its own
+  marker-fenced section for those agents and the rule would otherwise repeat.
+- With [Go support](#go-support), one more line is appended:
+
+  ```markdown
+  - Go: use gopls where compiler semantics matter: `go_symbol_references` before renames, removals, signature changes, or interface-method changes; `go_diagnostics` after cross-file, type, or import changes; and `go_vulncheck` after dependency changes or for security work. Use `go_workspace` only when the module/workspace layout is unclear; otherwise follow the normal routing and finish with Go tests.
+  ```
+
+- Cursor has no global instruction file, so it gets the same text through a
+  session-start hook in `~/.cursor/hooks.json`.
+
+The source of the block is [`agent-routing.md`](agent-routing.md) (and
+[`languages/go/agent-routing.md`](languages/go/agent-routing.md) for Go).
+
+## Supported agents
+
+Automatic detection configures every agent below whose command (or, for Cursor
+and Windsurf, app bundle) it finds. To configure only one, pass its
+selector:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash -s -- codex
+```
+
+| Agent | Selector | Where the routing goes |
+|---|---|---|
+| Claude Code | `claude` | `~/.claude/CLAUDE.md` |
+| Codex | `codex` | `~/.codex/AGENTS.md` |
+| Cursor | `cursor` | global hook in `~/.cursor/hooks.json` |
+| Gemini CLI | `gemini` | `~/.gemini/GEMINI.md` |
+| GitHub Copilot CLI | `copilot` | `~/.copilot/copilot-instructions.md` |
+| Windsurf | `windsurf` | `~/.codeium/windsurf/memories/global_rules.md` |
+| Grok Build | `grok` | `~/.grok/rules/agent-ready.md` |
+| OpenCode | `opencode` | `~/.config/opencode/AGENTS.md` |
+| Qwen Code | `qwen` | `~/.qwen/QWEN.md` |
+| Cline CLI | `cline` | `~/.cline/data/settings/rules/agent-ready.md` |
+| Kilo Code | `kilo` | `~/.config/kilo/AGENTS.md` |
+| Crush | `crush` | `~/.config/crush/CRUSH.md` |
+| goose | `goose` | `~/.config/goose/AGENTS.md` |
+
+Several agents at once take a comma list, for example
+`bash -s -- --agent claude,codex`. OpenCode plugins use OpenCode's
+instructions. Kilo Code is configured separately because its OpenCode-based CLI
+uses its own config directory.
+
+## What's installed
+
+| Job | Tools | Why an agent needs it |
+|---|---|---|
+| Code intelligence | [`codegraph`](https://github.com/colbymchenry/codegraph) | Answers "how does this work, who calls it, what breaks" in one call instead of a grep-and-read loop |
+| Compact output | [`rtk`](https://github.com/rtk-ai/rtk) | Condenses shell, build, and test output so it does not flood the context window |
+| Search and edit | [`ripgrep`](https://github.com/BurntSushi/ripgrep), [`ast-grep`](https://ast-grep.github.io/), [`sd`](https://github.com/chmln/sd) | Fast text search, syntax-aware code search and rewrite, predictable find-and-replace |
+| Python and data | [`uv`](https://docs.astral.sh/uv/), [`jq`](https://jqlang.org/), [`yq`](https://mikefarah.gitbook.io/yq/), [`mdq`](https://github.com/yshavit/mdq) | Throwaway Python dependencies, JSON/YAML/TOML queries and edits, reading one Markdown section |
+| Git and GitHub | [`gh`](https://cli.github.com/), [`worktrunk`](https://worktrunk.dev/), [`difftastic`](https://difftastic.wilfred.me.uk/) | GitHub API and PRs, isolated worktrees, diffs that ignore formatting noise |
+| Local checks | [`gitleaks`](https://github.com/gitleaks/gitleaks), [`osv-scanner`](https://google.github.io/osv-scanner/), [`actionlint`](https://github.com/rhysd/actionlint), [`shellcheck`](https://www.shellcheck.net/), [`hyperfine`](https://github.com/sharkdp/hyperfine) | Secrets, vulnerable dependencies, workflow and shell linting, honest benchmarks |
+| Command time limits (macOS) | [`coreutils`](https://www.gnu.org/software/coreutils/) (`timeout`) | Agents call `timeout` by reflex; macOS ships none |
+
+The generic installer and language installers are separate. Adding Go support
+does not change the base tool list.
 
 ### Linux without Homebrew
 
@@ -87,97 +234,58 @@ is missing. Go support builds `gopls` with your Go toolchain
 The installer makes one GitHub API request per tool it installs. If you hit the
 anonymous rate limit, set `GITHUB_TOKEN` and run it again.
 
-## Install for one agent
+## Code intelligence with CodeGraph
 
-Use one of these commands if you want to configure a specific agent instead of
-automatic detection.
+`codegraph` builds a local knowledge graph of a repository and answers
+structural questions from it — the source of the symbols involved, the call
+paths between them, and what a change would touch — instead of making the agent
+grep and read files one at a time.
+
+The graph is per project. Agent Ready installs the CLI; it does not index your
+repositories. Run this once in each project you want covered:
+
+```bash
+cd your-project
+codegraph init
+```
+
+That creates a local `.codegraph/` index; a running MCP server keeps it current
+as you edit. Without an MCP connection — for example an agent CodeGraph does not
+support — run `codegraph sync` after edits to refresh its symbol list; `explore`
+still reads the source from disk. Add `.codegraph/` to `.gitignore` rather than
+committing it. The routing rule uses the index only when that directory exists.
+Without one, the agent keeps using `rg`, `ast-grep`, and `Read`, and does not
+run `codegraph init` on its own.
 
 <details>
-<summary><strong>Codex</strong></summary>
+<summary>How CodeGraph is installed and wired</summary>
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash -s -- codex
-```
+Upstream publishes no Homebrew formula, so it is installed from its release
+archive on macOS and Linux alike — about 60 MB to download and 280 MB unpacked
+on the first run; later runs reuse the recorded release. Because that archive is
+a self-contained bundle:
 
-Routing is added to `~/.codex/AGENTS.md`.
+- the SHA-256 digest GitHub records for the asset is checked before unpacking;
+- versions live under `~/.local/share/agent-ready/codegraph/versions/`, and
+  only the launcher is linked into `~/.local/bin` (or `AGENT_READY_BIN_DIR`);
+- `--upgrade` updates that copy and prunes older versions; a `codegraph`
+  installed with npm or upstream's script is not replaced (MCP wiring and
+  telemetry still apply);
+- the installer turns anonymous usage telemetry off after wiring. Re-enable it
+  with `codegraph telemetry on`.
 
-</details>
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash -s -- claude
-```
-
-Routing is added to `~/.claude/CLAUDE.md`.
-
-</details>
-
-<details>
-<summary><strong>Cursor</strong></summary>
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash -s -- cursor
-```
-
-Routing is added through the global hook in `~/.cursor/hooks.json`.
+MCP wiring is delegated to CodeGraph's own installer, which knows each agent's
+config shape. Automatic installation passes `--target=auto`, so CodeGraph wires
+every agent it detects; an explicit `--agent` passes that agent's target. The
+command is `codegraph install --yes --target=… --location=global
+--no-permissions`, which merges the MCP server entry, may add CodeGraph's own
+marker-fenced section to the agent's instruction file, and (for Claude Code)
+adds its prompt hook in `settings.json`. CodeGraph writes that section for
+Claude Code, Codex, Gemini CLI, and OpenCode, so when `codegraph` is installed
+their agent-ready block leaves out its own CodeGraph line rather than repeat the
+same rule in every prompt. Other agents keep the line and get the CLI routing.
 
 </details>
-
-<details>
-<summary><strong>Gemini CLI</strong></summary>
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash -s -- gemini
-```
-
-Routing is added to `~/.gemini/GEMINI.md`.
-
-</details>
-
-<details>
-<summary><strong>GitHub Copilot CLI</strong></summary>
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash -s -- copilot
-```
-
-Routing is added to `~/.copilot/copilot-instructions.md`.
-
-</details>
-
-<details>
-<summary><strong>Windsurf</strong></summary>
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash -s -- windsurf
-```
-
-Routing is added to `~/.codeium/windsurf/memories/global_rules.md`.
-
-</details>
-
-### Additional agents
-
-Replace `opencode` with the selector you need:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstrap.sh | AGENT_READY_REF=v1.4.1 bash -s -- opencode
-```
-
-| Agent | Selector | Global instructions |
-|---|---|---|
-| Grok Build | `grok` | `~/.grok/rules/agent-ready.md` |
-| OpenCode | `opencode` | `~/.config/opencode/AGENTS.md` |
-| Qwen Code | `qwen` | `~/.qwen/QWEN.md` |
-| Cline CLI | `cline` | `~/.cline/data/settings/rules/agent-ready.md` |
-| Kilo Code | `kilo` | `~/.config/kilo/AGENTS.md` |
-| Crush | `crush` | `~/.config/crush/CRUSH.md` |
-| goose | `goose` | `~/.config/goose/AGENTS.md` |
-
-OpenCode plugins use OpenCode's instructions. Kilo Code is configured
-separately because its OpenCode-based CLI uses its own config directory.
 
 ## Go support
 
@@ -188,7 +296,7 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstr
 ```
 
 It installs `gopls`, connects `gopls mcp` to detected Codex, Claude Code, and
-Cursor installations, and adds the Go routing instructions.
+Cursor installations, and adds the [Go routing line](#what-gets-added-to-agentsmd).
 
 <details>
 <summary>Configure Go for one agent</summary>
@@ -205,73 +313,6 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstr
 ```
 
 </details>
-
-## What's installed
-
-| Job | Tools |
-|---|---|
-| Code intelligence | [`codegraph`](https://github.com/colbymchenry/codegraph) |
-| Compact output | [`rtk`](https://github.com/rtk-ai/rtk) |
-| Search and edit | [`ripgrep`](https://github.com/BurntSushi/ripgrep), [`ast-grep`](https://ast-grep.github.io/), [`sd`](https://github.com/chmln/sd) |
-| Python and data | [`uv`](https://docs.astral.sh/uv/), [`jq`](https://jqlang.org/), [`yq`](https://mikefarah.gitbook.io/yq/), [`mdq`](https://github.com/yshavit/mdq) |
-| Git and GitHub | [`gh`](https://cli.github.com/), [`worktrunk`](https://worktrunk.dev/), [`difftastic`](https://difftastic.wilfred.me.uk/) |
-| Local checks | [`gitleaks`](https://github.com/gitleaks/gitleaks), [`osv-scanner`](https://google.github.io/osv-scanner/), [`actionlint`](https://github.com/rhysd/actionlint), [`shellcheck`](https://www.shellcheck.net/), [`hyperfine`](https://github.com/sharkdp/hyperfine) |
-| Command time limits (macOS) | [`coreutils`](https://www.gnu.org/software/coreutils/) (`timeout`) |
-
-The generic installer and language installers are separate. Adding Go support
-does not change the base tool list.
-
-## Code intelligence
-
-`codegraph` builds a local knowledge graph of a repository and answers
-structural questions from it — the source of the symbols involved, the call
-paths between them, and what a change would touch — instead of making the agent
-grep and read files one at a time.
-
-Upstream publishes no Homebrew formula, so it is installed from its release
-archive on macOS and Linux alike — about 60 MB to download and 280 MB unpacked
-on the first run; later runs reuse the recorded release. Because that archive is
-a self-contained bundle:
-
-- the SHA-256 digest GitHub records for the asset is checked before unpacking;
-- versions live under `~/.local/share/agent-ready/codegraph/versions/`, and
-  only the launcher is linked into `~/.local/bin` (or `AGENT_READY_BIN_DIR`);
-- `--upgrade` updates that copy and prunes older versions; a `codegraph`
-  installed with npm or upstream's script is not replaced (MCP wiring and
-  telemetry still apply);
-- the installer turns anonymous usage telemetry off after wiring. Re-enable it
-  with `codegraph telemetry on`.
-
-The graph is per project. Agent Ready installs the CLI; it does not index your
-repositories. Run this once in each project you want covered:
-
-```bash
-cd your-project
-codegraph init
-```
-
-That creates a local `.codegraph/` index; a running MCP server keeps it current
-as you edit. Without an MCP connection — for example an agent CodeGraph does not
-support — run `codegraph sync` after edits to refresh its symbol list; `explore`
-still reads the source from disk. Add `.codegraph/` to `.gitignore` rather than
-committing it. The shared routing instructions use the index only when that
-directory exists. Without one, the agent keeps using `rg`, `ast-grep`, and
-`Read`, and does not run `codegraph init` on its own.
-
-The shared entry is deliberately one line: the tool, what it indexes, its two
-entry points, when to trust its output, and the no-index rule. The full command
-list stays in `codegraph --help`, where it costs nothing until it is needed.
-
-MCP wiring is delegated to CodeGraph's own installer, which knows each agent's
-config shape. Automatic installation passes `--target=auto`, so CodeGraph wires
-every agent it detects; an explicit `--agent` passes that agent's target. The
-command is `codegraph install --yes --target=… --location=global
---no-permissions`, which merges the MCP server entry, may add CodeGraph's own
-marker-fenced section to the agent's instruction file, and (for Claude Code)
-adds its prompt hook in `settings.json`. CodeGraph writes that section for
-Claude Code, Codex, Gemini CLI, and OpenCode, so when `codegraph` is installed
-their agent-ready block leaves out its own CodeGraph line rather than repeat the
-same rule in every prompt. Other agents keep the line and get the CLI routing.
 
 ## Safe to run again
 
@@ -391,6 +432,7 @@ agent-ready --agent claude,codex   # configure a comma list
 agent-ready language go            # add Go support
 agent-ready status                 # tree, launcher, receipt, and drift
 agent-ready doctor                 # ok/problem for the install and every tool
+agent-ready update                 # move to the newest release
 agent-ready rollback               # reinstall the newest kept older release
 agent-ready uninstall              # remove only what agent-ready wrote
 ```
@@ -417,6 +459,7 @@ install but does not install the command.
 Quick check:
 
 ```bash
+agent-ready doctor
 rtk --version
 rg --version
 ast-grep --version
@@ -435,8 +478,64 @@ cd agent-ready
 ./languages/go/verify.sh # after installing Go support
 ```
 
-`verify.sh` and `test-install.sh` use temporary fixtures and do not edit your
-real agent configuration.
+`verify.sh` reproduces every claim about the tools in this README on your
+machine. `verify.sh` and `test-install.sh` use temporary fixtures and do not
+edit your real agent configuration.
+
+</details>
+
+## FAQ
+
+<details>
+<summary><strong>Does it replace my AGENTS.md or CLAUDE.md?</strong></summary>
+
+No. It adds one marker-fenced block and leaves the rest of the file as it was.
+If the file does not exist, it is created with only that block. Edits you make
+inside the markers stop the next run instead of being overwritten.
+
+</details>
+
+<details>
+<summary><strong>Does it install Claude Code, Codex, or other agents?</strong></summary>
+
+No. It configures agents that are already installed and does not sign in to
+their services. Install your agent first, then run agent-ready.
+
+</details>
+
+<details>
+<summary><strong>Will it upgrade tools I already have?</strong></summary>
+
+No. Existing tools are kept at their current version. Upgrades happen only with
+`--upgrade` (or `agent-ready update --upgrade-tools`).
+
+</details>
+
+<details>
+<summary><strong>Does it need sudo or root?</strong></summary>
+
+No. On macOS it uses your Homebrew; on Linux it installs into `~/.local/bin`.
+The only `sudo` in this README is the optional `apt-get` line for `curl`,
+`xz`, and `unzip`.
+
+</details>
+
+<details>
+<summary><strong>Can I change the routing rules?</strong></summary>
+
+Yes. Put your own rules outside the markers; the installer never touches them.
+To change a managed line, edit it and pass `--force` on the next run, which
+replaces the block with the release's version, or open an issue so the rule is
+fixed for everyone.
+
+</details>
+
+<details>
+<summary><strong>Can I preview the changes first?</strong></summary>
+
+Yes. Add `--dry-run` to any install, update, or uninstall command. It reports
+`would add`, `would refresh`, `unchanged`, or `blocked` for every file and
+writes nothing.
 
 </details>
 
@@ -480,7 +579,8 @@ it to the tool's project.
 <details>
 <summary><code>No supported harness found</code></summary>
 
-Install your coding agent or choose it explicitly from the agent list above.
+Install your coding agent or choose it explicitly from the
+[agent list](#supported-agents).
 
 </details>
 
@@ -490,6 +590,15 @@ Install your coding agent or choose it explicitly from the agent list above.
 Open the file printed in the error. It must contain either no agent-ready
 markers or one start marker followed by one end marker. Fix duplicate or
 unmatched markers and run the installer again.
+
+</details>
+
+<details>
+<summary><code>has local edits inside the agent-ready block</code></summary>
+
+Someone edited the managed block, so its fingerprint no longer matches. Move
+your edit outside the markers and rerun, or rerun with `--force` to replace the
+block with the release's version.
 
 </details>
 
@@ -516,8 +625,8 @@ command resolves.
 
 The project has no `.codegraph/` index. Run `codegraph init` in the repository
 root once; a running MCP server picks the new index up without a restart. The
-installer does not index repositories; the shared instructions deliberately
-leave that decision to you.
+installer does not index repositories; the routing rule deliberately leaves
+that decision to you.
 
 On WSL with the repository on a Windows drive, CodeGraph keeps its index in
 `.codegraph-wsl/` instead; the command still works there.
@@ -535,6 +644,9 @@ On WSL with the repository on a Windows drive, CodeGraph keeps its index in
   comes from its release bundle because upstream publishes no formula
 - language integrations under `languages/<name>/`
 - runnable verification for every included tool
+
+Contributions follow [`AGENTS.md`](AGENTS.md). Report security issues privately
+as described in [`SECURITY.md`](SECURITY.md).
 
 ## License
 
