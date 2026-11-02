@@ -274,6 +274,16 @@ The installers preserve existing configuration and update only the block
 between the `agent-ready:start` and `agent-ready:end` markers. Cursor hooks and
 MCP configuration are merged instead of replaced.
 
+Each managed block starts with a `<!-- agent-ready vX.Y.Z sha256:… -->` line
+that records the release which wrote it and fingerprints the block. If you edit
+inside the markers, the next run stops before changing any file and names it;
+move the edit outside the markers, or rerun with `--force` to replace the
+block. `--dry-run` performs the same detection and checks and reports
+`would add`, `would refresh`, `unchanged`, or `blocked` for every target
+without installing tools, invoking `rtk` or `codegraph`, or modifying any file.
+The installer also records the agents, languages, tool method, and version it
+configured in `~/.config/agent-ready/receipt` (or under `$XDG_CONFIG_HOME`).
+
 Release archives are checked against the SHA-256 digest GitHub records for the
 `agent-ready-vX.Y.Z.tar.gz` asset before anything inside them runs, and a release
 that publishes no such asset is refused. When `gh` is installed and signed in,
