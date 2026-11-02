@@ -197,7 +197,7 @@ status() {
 			printf '  malformed\n'
 		fi
 	else
-		printf 'no receipt (installed before v1.3.0 or not installed)\n'
+		printf 'no receipt (installed before v1.4.0 or not installed)\n'
 	fi
 	printf 'versions: %s\n' "$(kept_versions)"
 	printf 'drift:\n'
@@ -226,7 +226,7 @@ doctor() {
 			doctor_problem "malformed receipt ${receipt}"
 		fi
 	else
-		doctor_ok 'no receipt (installed before v1.3.0 or not installed)'
+		doctor_ok 'no receipt (installed before v1.4.0 or not installed)'
 	fi
 	if [ -L "${launcher}" ]; then
 		target=$(resolve_path "${launcher}" || true)
@@ -274,7 +274,7 @@ rollback() {
 	local receipt dir name target=
 	receipt=$(receipt_path)
 	[ -f "${receipt}" ] ||
-		die 'no receipt: nothing to roll back from (installed before v1.3.0 or not installed)'
+		die 'no receipt: nothing to roll back from (installed before v1.4.0 or not installed)'
 	receipt_read "${receipt}" || exit 1
 	for dir in "${versions_dir}"/v*; do
 		[ -d "${dir}" ] || continue
@@ -300,7 +300,7 @@ rollback() {
 	printf 'agent-ready %s is now the launcher default\n' "${target}"
 }
 
-# The receipt records what an update repeats. Without one (installed by v1.2.x
+# The receipt records what an update repeats. Without one (installed by v1.3.0
 # or earlier) only the machine is left to read: auto detection and the tool mode.
 load_state() {
 	local file
@@ -533,7 +533,7 @@ update() {
 	load_state
 	cur="${receipt_version:-none}"
 	if [ -z "${receipt_version}" ]; then
-		printf 'No receipt: assuming agents=auto and tools=%s (installed before v1.3.0)\n' "${receipt_tools}"
+		printf 'No receipt: assuming agents=auto and tools=%s (installed before v1.4.0)\n' "${receipt_tools}"
 	fi
 	if [ -n "${explicit}" ]; then
 		target="${explicit}"

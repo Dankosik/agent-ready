@@ -9,7 +9,7 @@ receipt_path() {
 	printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready/receipt"
 }
 
-# An install from v1.2.x or earlier wrote no receipt, so an update can only read
+# An install from v1.3.0 or earlier wrote no receipt, so an update can only read
 # the tool mode from the machine: the release-binary state file, then Homebrew,
 # then nothing. The agents were auto-detected by that installer.
 receipt_legacy_tools() {

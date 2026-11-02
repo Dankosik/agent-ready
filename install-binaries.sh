@@ -47,6 +47,7 @@ difftastic Wilfred/difftastic difft ^difft-[^-]+-x86_64-unknown-linux-musl\.tar\
 yq mikefarah/yq yq ^yq_linux_amd64$ ^yq_linux_arm64$
 mdq yshavit/mdq mdq ^mdq-linux-x64-musl\.tar\.gz$ -
 hyperfine sharkdp/hyperfine hyperfine ^hyperfine-v[^-]+-x86_64-unknown-linux-musl\.tar\.gz$ ^hyperfine-v[^-]+-aarch64-unknown-linux-musl\.tar\.gz$
+osv-scanner google/osv-scanner osv-scanner ^osv-scanner_linux_amd64$ ^osv-scanner_linux_arm64$
 EOF
 }
 

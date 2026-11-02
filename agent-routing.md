@@ -1,10 +1,13 @@
 Tool routing (use instead of defaults):
 - Shell: prefix commands with `rtk`; `rtk bypass <cmd>` for unfiltered output.
-- Search: `rg` text, `rg --files` files; code structure (calls, declarations, loops, branches): `ast-grep run -l <lang> -p '<pattern>'` (`$X` matches any node), even where a regex fits.
+- Builds/tests: don't pipe them into `tail`/`head`; the pipe exits 0 and cuts the failure. rtk already condenses cargo/go/pytest/vitest/tsc output; if you must trim, `set -o pipefail` first.
+- Literal multi-line edits: use your file-edit tool, which fails when the text is missing; a script's `str.replace` and `sd` silently change nothing, so check the match count.
+- Search: `rg` text, `rg --files` files; code structure (calls, declarations, loops, branches): `ast-grep run -l <lang> -p '<pattern>'` (`$X` matches any node; add `-r '<new>' -U` to rewrite), even where a regex fits.
 - Edit: `sd -F 'old' 'new' <file>` (literal, in place; drop `-F` for regex); temporary Python deps: `uv run --with <pkg>`.
-- Data: `jq` JSON, `yq` YAML/TOML/XML, `gh api --jq` GitHub.
+- Data: `jq` JSON, `yq` YAML/TOML/XML (`yq -i` edits these and JSON in place), `gh api --jq` GitHub.
 - Worktrees: `wt list` first, then Worktrunk (`wt switch -c <branch>`); `wt <cmd> --help` before mutating.
-- Read: `mdq '# <heading>' <file>` Markdown sections; `git -c diff.external='difft --display inline' diff` code diffs, without `rtk`.
-- Check: `shellcheck` shell, `actionlint` workflows, `gitleaks dir|git --redact .` files|history.
-- Timing: `hyperfine --warmup 3`.
+- Read: `mdq '# <heading>' <file>` to read one section of a long Markdown file instead of all of it.
+- Diffs: when formatting noise may hide a logic change, `git -c diff.external='difft --display inline' diff` (without `rtk`).
+- Check: `shellcheck` shell, `actionlint` workflows, `gitleaks dir|git --redact .` files|history, `osv-scanner scan source -r .` vulnerable dependencies.
+- Timing: to compare commands, `hyperfine --warmup 3 '<a>' '<b>'`, not single `time` runs.
 - Code graph: index of symbols, calls, imports. With `.codegraph/`, first ask `codegraph_explore` (MCP) or `codegraph explore "<question>"` how code works, who calls what, what a change affects; its source is current, so do not re-read it, but a file marked changed since sync may have stale callers (`codegraph sync`). No index: normal routing; never `codegraph init` unasked.
