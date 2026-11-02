@@ -40,7 +40,7 @@ sudo apt-get install -y curl ca-certificates xz-utils unzip
 ```
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash
 ```
 
 That's it. The installer adds 17 language-independent tools and configures
@@ -51,7 +51,7 @@ On macOS it also installs GNU coreutils, because agents call `timeout` by reflex
 and macOS has none. If no `timeout` is on your `PATH`, the installer links
 `~/.local/bin/timeout` to `gtimeout`; it never replaces a file already there.
 
-The command is pinned to the immutable `v1.3.0` release. Upgrade by choosing a
+The command is pinned to the immutable `v1.4.0` release. Upgrade by choosing a
 newer release version in both places in the command.
 
 > [!NOTE]
@@ -96,7 +96,7 @@ automatic detection.
 <summary><strong>Codex</strong></summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- codex
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- codex
 ```
 
 Routing is added to `~/.codex/AGENTS.md`.
@@ -107,7 +107,7 @@ Routing is added to `~/.codex/AGENTS.md`.
 <summary><strong>Claude Code</strong></summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- claude
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- claude
 ```
 
 Routing is added to `~/.claude/CLAUDE.md`.
@@ -118,7 +118,7 @@ Routing is added to `~/.claude/CLAUDE.md`.
 <summary><strong>Cursor</strong></summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- cursor
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- cursor
 ```
 
 Routing is added through the global hook in `~/.cursor/hooks.json`.
@@ -129,7 +129,7 @@ Routing is added through the global hook in `~/.cursor/hooks.json`.
 <summary><strong>Gemini CLI</strong></summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- gemini
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- gemini
 ```
 
 Routing is added to `~/.gemini/GEMINI.md`.
@@ -140,7 +140,7 @@ Routing is added to `~/.gemini/GEMINI.md`.
 <summary><strong>GitHub Copilot CLI</strong></summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- copilot
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- copilot
 ```
 
 Routing is added to `~/.copilot/copilot-instructions.md`.
@@ -151,7 +151,7 @@ Routing is added to `~/.copilot/copilot-instructions.md`.
 <summary><strong>Windsurf</strong></summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- windsurf
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- windsurf
 ```
 
 Routing is added to `~/.codeium/windsurf/memories/global_rules.md`.
@@ -163,7 +163,7 @@ Routing is added to `~/.codeium/windsurf/memories/global_rules.md`.
 Replace `opencode` with the selector you need:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- opencode
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- opencode
 ```
 
 | Agent | Selector | Global instructions |
@@ -184,7 +184,7 @@ separately because its OpenCode-based CLI uses its own config directory.
 Run this after the quick start command if you work with Go:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- language go
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- language go
 ```
 
 It installs `gopls`, connects `gopls mcp` to detected Codex, Claude Code, and
@@ -195,13 +195,13 @@ Cursor installations, and adds the Go routing instructions.
 
 ```bash
 # Codex
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- language go --agent codex
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- language go --agent codex
 
 # Claude Code
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- language go --agent claude
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- language go --agent claude
 
 # Cursor
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- language go --agent cursor
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- language go --agent cursor
 ```
 
 </details>
@@ -301,13 +301,13 @@ release, and CodeGraph is upgraded only when Agent Ready installed it. Use
 `--configure-only` to skip tool installation entirely:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- codex --configure-only
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- codex --configure-only
 ```
 
 To explicitly upgrade the generic tools:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.3.0/bootstrap.sh | AGENT_READY_REF=v1.3.0 bash -s -- --upgrade
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.0/bootstrap.sh | AGENT_READY_REF=v1.4.0 bash -s -- --upgrade
 ```
 
 ## Update
