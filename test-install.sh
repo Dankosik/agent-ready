@@ -148,6 +148,12 @@ graph_line=$(rg '^- Code graph:' "${fake_home}/.copilot/copilot-instructions.md"
 # rtk renamed `proxy` to `bypass`, and sd treats its pattern as a regex unless -F.
 rg -qF '`rtk bypass <cmd>`' "${fake_home}/.codex/AGENTS.md"
 rg -qF '`sd -F ' "${fake_home}/.codex/AGENTS.md"
+# Without the rewrite flags agents fall back to line-based edits of code.
+rg -qF "\`-r '<new>' -U\` to rewrite" "${fake_home}/.codex/AGENTS.md"
+# Narrow tools name their trigger; a category alone reads as "replace the default".
+rg -qF 'one section of a long Markdown file' "${fake_home}/.codex/AGENTS.md"
+rg -qF 'when formatting noise may hide a logic change' "${fake_home}/.codex/AGENTS.md"
+rg -qF 'to compare commands, `hyperfine' "${fake_home}/.codex/AGENTS.md"
 if rg -qF 'rtk proxy' "${fake_home}/.codex/AGENTS.md"; then
 	printf 'routing still names the deprecated rtk proxy\n' >&2
 	exit 1
