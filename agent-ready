@@ -329,7 +329,8 @@ release_cutoff() {
 
 # The newest stable release that publishes the verified archive and has aged
 # past AGENT_READY_MIN_RELEASE_AGE hours, so a broken release can be withdrawn
-# before anyone updates to it. GitHub lists releases newest first.
+# before anyone updates to it. GitHub lists releases newest first. Prints
+# nothing when no release qualifies yet; the caller decides what that means.
 latest_release() {
 	local list="$1" age="${AGENT_READY_MIN_RELEASE_AGE:-24}" cutoff='' tag
 	[[ "${age}" =~ ^[0-9]+$ ]] ||
@@ -351,8 +352,7 @@ latest_release() {
 			| $r.tag_name
 		][0] // empty
 	' "${list}") || die "cannot read the release list from ${release_api}"
-	[ -n "${tag}" ] ||
-		die "no agent-ready release with a verified archive is eligible (minimum age ${age}h); retry later or name a version"
+	[ -n "${tag}" ] || return 0
 	receipt_valid_version "${tag}" || die "unexpected release tag: ${tag}"
 	printf '%s\n' "${tag}"
 }
@@ -539,6 +539,15 @@ update() {
 		target="${explicit}"
 	else
 		target=$(latest_release "${update_work}/releases.json")
+		# Every release still inside the minimum age (the first one to ship an
+		# archive, for instance) leaves nothing newer to offer, which is not an
+		# error for an install that already has a version.
+		if [ -z "${target}" ]; then
+			[ "${cur}" != none ] ||
+				die "no agent-ready release with a verified archive is eligible (minimum age ${AGENT_READY_MIN_RELEASE_AGE:-24}h); retry later or name a version"
+			printf 'agent-ready %s is up to date\n' "${cur}"
+			return 0
+		fi
 	fi
 
 	# A named version is allowed to be older (a downgrade); an unnamed one is
