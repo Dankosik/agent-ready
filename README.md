@@ -274,6 +274,11 @@ The installers preserve existing configuration and update only the block
 between the `agent-ready:start` and `agent-ready:end` markers. Cursor hooks and
 MCP configuration are merged instead of replaced.
 
+Release archives are checked against the SHA-256 digest GitHub records for the
+`agent-ready-vX.Y.Z.tar.gz` asset before anything inside them runs, and a release
+that publishes no such asset is refused. When `gh` is installed and signed in,
+the build provenance of the archive is verified too.
+
 Run the same command again whenever you want to refresh the managed
 configuration. Installed tools are not upgraded unless you pass `--upgrade`;
 with release binaries, `--upgrade` downloads only the tools that have a newer

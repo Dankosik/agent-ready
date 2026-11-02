@@ -485,6 +485,25 @@ EOF
 			--arg url "file://${dir}/${name}" '{name: $name, digest: $digest, browser_download_url: $url}'
 	done | jq -s --arg tag "${tag}" '{tag_name: $tag, assets: .}' >"${gh_api}/repos/colbymchenry/codegraph/releases/latest"
 }
+# publish_agent_ready <tag> [version] — one release with the archive the
+# release-asset workflow attaches, holding what bootstrap.sh needs.
+publish_agent_ready() {
+	local tag="$1" version="${2:-$1}" name dir stage
+	name="agent-ready-${tag}"
+	dir="${gh_assets}/Dankosik/agent-ready/${tag}"
+	stage="${work}/agent-ready-stage/${tag}"
+	rm -rf "${stage}"
+	mkdir -p "${stage}/${name}" "${dir}" "${gh_api}/repos/Dankosik/agent-ready/releases/tags"
+	# shellcheck disable=SC2016 # $* and $HOME belong to the generated script
+	printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"${HOME}/bootstrap-calls"\n' >"${stage}/${name}/install.sh"
+	chmod +x "${stage}/${name}/install.sh"
+	printf '%s\n' "${version}" >"${stage}/${name}/VERSION"
+	tar -czf "${dir}/${name}.tar.gz" -C "${stage}" "${name}"
+	jq -n --arg name "${name}.tar.gz" --arg digest "sha256:$(digest_of "${dir}/${name}.tar.gz")" \
+		--arg url "file://${dir}/${name}.tar.gz" '{name: $name, digest: $digest, browser_download_url: $url}' |
+		jq -s --arg tag "${tag}" '{tag_name: $tag, assets: .}' \
+			>"${gh_api}/repos/Dankosik/agent-ready/releases/tags/${tag}"
+}
 publish_all 1.0.0
 publish_codegraph v9.9.9
 
@@ -712,5 +731,66 @@ if HOME="${cg_home}" PATH="${test_path}" XDG_CONFIG_HOME="${cg_home}/.config" \
 	exit 1
 fi
 rg -qF 'unsupported architecture: riscv64' "${work}/codegraph.out"
+
+# bootstrap.sh verifies a release archive against the digest GitHub records
+# before running the installer inside it. The copy sits alone in its own
+# directory, so it has no checkout beside it and takes the download path.
+bootstrap_copy="${work}/bootstrap-download"
+mkdir -p "${bootstrap_copy}"
+cp "${root}/bootstrap.sh" "${bootstrap_copy}/bootstrap.sh"
+publish_agent_ready v9.9.9
+run_bootstrap() {
+	HOME="$1" PATH="$2" XDG_CONFIG_HOME="$1/.config" \
+		AGENT_READY_REF=v9.9.9 AGENT_READY_GITHUB_API="file://${gh_api}" \
+		bash "${bootstrap_copy}/bootstrap.sh" codex --configure-only </dev/null
+}
+
+verified_home="${work}/verified-home"
+mkdir -p "${verified_home}"
+run_bootstrap "${verified_home}" "${test_path}" >"${work}/bootstrap.out"
+rg -qF 'Downloading agent-ready v9.9.9' "${work}/bootstrap.out"
+rg -qxF -- '--agent codex --configure-only' "${verified_home}/bootstrap-calls"
+
+# The same release without jq, as on a fresh Linux.
+no_jq_home="${work}/no-jq-bootstrap-home"
+mkdir -p "${no_jq_home}"
+run_bootstrap "${no_jq_home}" "${base_bin}" >"${work}/bootstrap.out"
+rg -qxF -- '--agent codex --configure-only' "${no_jq_home}/bootstrap-calls"
+
+# A digest mismatch runs nothing.
+wrong_digest_home="${work}/wrong-digest-home"
+mkdir -p "${wrong_digest_home}"
+jq '.assets[0].digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
+	"${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.9" >"${work}/agent-ready.json"
+cp "${work}/agent-ready.json" "${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.9"
+if run_bootstrap "${wrong_digest_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1; then
+	printf 'bootstrap checksum mismatch unexpectedly succeeded\n' >&2
+	exit 1
+fi
+rg -qF 'checksum mismatch for agent-ready-v9.9.9.tar.gz; nothing installed' "${work}/bootstrap.out"
+[ ! -e "${wrong_digest_home}/bootstrap-calls" ]
+
+# A release without the archive is refused.
+no_asset_home="${work}/no-asset-home"
+mkdir -p "${no_asset_home}"
+jq -n '{tag_name: "v9.9.9", assets: []}' >"${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.9"
+if run_bootstrap "${no_asset_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1; then
+	printf 'bootstrap without a release archive unexpectedly succeeded\n' >&2
+	exit 1
+fi
+rg -qF 'agent-ready v9.9.9 has no verified release archive; use a newer release' "${work}/bootstrap.out"
+[ ! -e "${no_asset_home}/bootstrap-calls" ]
+
+# An archive whose VERSION disagrees with the tag is refused after verification.
+version_home="${work}/version-home"
+mkdir -p "${version_home}"
+publish_agent_ready v9.9.9 v9.9.8
+if run_bootstrap "${version_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1; then
+	printf 'bootstrap with a mismatched VERSION unexpectedly succeeded\n' >&2
+	exit 1
+fi
+rg -qF 'agent-ready v9.9.9: archive VERSION does not match the tag' "${work}/bootstrap.out"
+[ ! -e "${version_home}/bootstrap-calls" ]
+publish_agent_ready v9.9.9
 
 printf 'installer routing checks passed\n'

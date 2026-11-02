@@ -21,6 +21,10 @@ for people who run its installers against real machines and real agent configs.
   SHA-256 digest before unpacking, write only to the versioned bundle directory,
   the launcher symlink, and the agent-ready state file, and must not replace a
   `codegraph` installation they do not own.
+- Archive bootstraps (`bootstrap.sh`) must verify a release archive against the
+  GitHub SHA-256 digest before unpacking it, refuse a release that does not
+  publish `agent-ready-vX.Y.Z.tar.gz`, and send `GITHUB_TOKEN` only to
+  `api.github.com`.
 
 ## Protect user machines
 
@@ -106,13 +110,18 @@ so explicitly.
   terminal-success for that SHA.
 - Prepare a release PR that changes every public install URL and matching
   `AGENT_READY_REF` in `README.md` to the same new version. Moving `main` URLs
-  are forbidden. Confirm with `rg` before merge.
+  are forbidden. Confirm with `rg` before merge. The same PR sets `VERSION` to
+  the new version, so tag, `VERSION`, and the archive prefix agree.
+- Before publishing, the draft release must carry the
+  `agent-ready-vX.Y.Z.tar.gz` asset attached by the `release-asset` workflow;
+  immutable releases cannot gain assets afterwards.
 - Review release notes and the final tree before publishing. Do not release from
   a feature branch, dirty checkout, local-only commit, or merely green PR head.
 - Immutable releases are mandatory. Publish `vX.Y.Z` against the exact accepted
   `main` SHA; never move, delete, or reuse a release tag.
 - Immediately read back the release and tag through the GitHub API. The release
-  must report `immutable: true`, and the tag must resolve to the accepted SHA.
+  must report `immutable: true`, its `agent-ready-vX.Y.Z.tar.gz` asset must be
+  present with a `sha256:` digest, and the tag must resolve to the accepted SHA.
 - Run the documented version-pinned `curl | AGENT_READY_REF=... bash` path in an
   isolated temporary `HOME` with fake agent executables. This validates the
   public bootstrap and archive, not just the local checkout.

@@ -1,0 +1,81 @@
+name: Release asset
+
+# Immutable releases accept no assets after publishing, so the archive is built
+# from the draft release's target commit and attached before the release goes
+# live. bootstrap.sh verifies this asset against its GitHub-recorded digest.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft release tag to attach the archive to
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Validate tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "tag must look like vX.Y.Z, got: $TAG" >&2
+            exit 1
+          fi
+
+      - name: Find the draft release
+        id: release
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --json isDraft,targetCommitish > release.json; then
+            echo "$TAG is not a draft release" >&2
+            exit 1
+          fi
+          jq -e '.isDraft == true' release.json >/dev/null ||
+            { echo "$TAG is not a draft release" >&2; exit 1; }
+          sha=$(jq -r '.targetCommitish' release.json)
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "$TAG does not target a full commit SHA: $sha" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.release.outputs.sha }}
+          persist-credentials: false
+
+      - name: Build the archive
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$(cat VERSION)" != "$TAG" ]; then
+            echo "VERSION says $(cat VERSION), not $TAG" >&2
+            exit 1
+          fi
+          git archive --format=tar.gz --prefix="agent-ready-${TAG}/" -o "agent-ready-${TAG}.tar.gz" HEAD
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: agent-ready-${{ inputs.tag }}.tar.gz
+
+      - name: Attach the archive
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "$TAG" "agent-ready-${TAG}.tar.gz"
