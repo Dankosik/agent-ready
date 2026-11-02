@@ -263,8 +263,10 @@ every agent it detects; an explicit `--agent` passes that agent's target. The
 command is `codegraph install --yes --target=… --location=global
 --no-permissions`, which merges the MCP server entry, may add CodeGraph's own
 marker-fenced section to the agent's instruction file, and (for Claude Code)
-adds its prompt hook in `settings.json`. Agents CodeGraph does not support still
-get the CLI routing.
+adds its prompt hook in `settings.json`. CodeGraph writes that section for
+Claude Code, Codex, Gemini CLI, and OpenCode, so when `codegraph` is installed
+their agent-ready block leaves out its own CodeGraph line rather than repeat the
+same rule in every prompt. Other agents keep the line and get the CLI routing.
 
 ## Safe to run again
 

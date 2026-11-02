@@ -1,10 +1,10 @@
-Tool routing:
-- Output: prefix shell commands with `rtk`; use `rtk proxy <cmd>` only for exact output.
-- Search: `rg`/`rg --files` for literal text and files; `ast-grep run --lang <lang> --pattern '...'` for code shapes—calls, declarations, loops, or branches—even when regex could match.
-- Edit/Python: `sd 'old' 'new' <file>` for replacement; `uv run --with <pkg>` for temporary dependencies.
-- Data/GitHub: `jq` for JSON, `yq` for YAML/TOML/XML, `gh api --jq` for GitHub state.
-- Worktrees: start with `wt list`; use Worktrunk for lifecycle operations and read `wt <command> --help` before mutations.
-- Docs/diffs: `mdq <query> <file>` for Markdown sections; `git -c diff.external='difft --display inline' diff` for code diffs.
-- Checks: `shellcheck` for shell, `actionlint` for workflows, `gitleaks dir --redact .` for files, `gitleaks git --redact .` for history.
-- Benchmarks: `hyperfine --warmup 3` for performance comparisons.
-- Code graph: CodeGraph is a local graph of symbols, calls, and imports. With `.codegraph/`, `codegraph_explore` (MCP) or `codegraph explore "<question>"` (CLI) answers how code works, who calls what, and what a change affects in one call with the source — use it first and don't re-read it unless it flags staleness. No index: normal routing; never `codegraph init` unasked.
+Tool routing (use instead of defaults):
+- Shell: prefix commands with `rtk`; `rtk proxy <cmd>` for exact output.
+- Search: `rg` text, `rg --files` files; code structure (calls, declarations, loops, branches): `ast-grep run -l <lang> -p '<pattern>'`, even where a regex fits.
+- Edit: `sd 'old' 'new' <file>`; temporary Python deps: `uv run --with <pkg>`.
+- Data: `jq` JSON, `yq` YAML/TOML/XML, `gh api --jq` GitHub.
+- Worktrees: `wt list` first, then Worktrunk; `wt <cmd> --help` before mutating.
+- Read: `mdq <query> <file>` Markdown sections; `git -c diff.external='difft --display inline' diff` code diffs.
+- Check: `shellcheck` shell, `actionlint` workflows, `gitleaks dir|git --redact .` files|history.
+- Timing: `hyperfine --warmup 3`.
+- Code graph: index of symbols, calls, imports. With `.codegraph/`, first ask `codegraph_explore` (MCP) or `codegraph explore "<question>"` how code works, who calls what, what a change affects; trust its source unless flagged stale. No index: normal routing; never `codegraph init` unasked.

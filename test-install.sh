@@ -118,10 +118,21 @@ for target in \
 	"${fake_home}/.config/goose/AGENTS.md"; do
 	[ "$(rg -c '^<!-- agent-ready:start -->$' "${target}")" -eq 1 ]
 	[ "$(rg -c '^<!-- agent-ready:end -->$' "${target}")" -eq 1 ]
-	rg -q '^Tool routing:$' "${target}"
-	rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${target}"
-	rg -qF 'unless it flags staleness' "${target}"
-	rg -qF 'never `codegraph init` unasked' "${target}"
+	rg -q '^Tool routing \(use instead of defaults\):$' "${target}"
+	case "${target}" in
+	*/.claude/* | */.codex/* | */.gemini/* | */opencode/*)
+		# `codegraph install` writes its own section into these files.
+		if rg -q '^- Code graph:' "${target}"; then
+			printf 'CodeGraph routing duplicated in %s\n' "${target}" >&2
+			exit 1
+		fi
+		;;
+	*)
+		rg -qF 'Code graph: index of symbols, calls, imports' "${target}"
+		rg -qF 'trust its source unless flagged stale' "${target}"
+		rg -qF 'never `codegraph init` unasked' "${target}"
+		;;
+	esac
 	if rg -q '^- Go:' "${target}"; then
 		printf 'generic install unexpectedly included Go routing in %s\n' "${target}" >&2
 		exit 1
@@ -129,7 +140,7 @@ for target in \
 done
 
 # The shared block is sent with every prompt; keep the CodeGraph line terse.
-graph_line=$(rg '^- Code graph:' "${fake_home}/.codex/AGENTS.md")
+graph_line=$(rg '^- Code graph:' "${fake_home}/.copilot/copilot-instructions.md")
 [ "${#graph_line}" -le 400 ] || {
 	printf 'CodeGraph routing line is %s characters; keep it under 400\n' "${#graph_line}" >&2
 	exit 1
@@ -158,7 +169,7 @@ jq -e '
 	([.hooks.sessionStart[] | select(.command == "./hooks/existing.sh")] | length) == 1 and
 	([.hooks.sessionStart[] | select(.command == "cat ./hooks/agent-ready-session-start.json")] | length) == 1
 ' "${fake_home}/.cursor/hooks.json" >/dev/null
-jq -e '.additional_context | contains("Tool routing:") and contains("Code graph:")' \
+jq -e '.additional_context | contains("Tool routing (use instead of defaults):") and contains("Code graph:")' \
 	"${fake_home}/.cursor/hooks/agent-ready-session-start.json" >/dev/null
 rg -qF 'install --yes --target=auto --location=global --no-permissions' "${fake_home}/codegraph-calls"
 rg -qx 'telemetry off' "${fake_home}/codegraph-calls"
@@ -191,7 +202,7 @@ for expected in \
 	'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
 	'init -g --gemini --hook-only --auto-patch --no-trust-filters' \
 	'init -g --copilot --hook-only --auto-patch --no-trust-filters' \
-	'init -g --opencode --no-trust-filters'; do
+	'init -g --opencode --hook-only --no-patch --no-trust-filters'; do
 	rg -qF "${expected}" "${fake_home}/rtk-calls"
 done
 
@@ -215,7 +226,7 @@ HOME="${targeted_home}" PATH="${test_path}" \
 	CODEX_HOME="${targeted_home}/.codex" \
 	AGENT_READY_ARCHIVE_URL="file://${archive}" \
 	bash -s -- codex --configure-only <"${root}/bootstrap.sh" >/dev/null
-rg -q '^Tool routing:$' "${targeted_home}/.codex/AGENTS.md"
+rg -q '^Tool routing \(use instead of defaults\):$' "${targeted_home}/.codex/AGENTS.md"
 [ "$(rg -c '^<!-- agent-ready:start -->$' "${targeted_home}/.codex/AGENTS.md")" -eq 1 ]
 for untouched in \
 	"${targeted_home}/.claude/CLAUDE.md" \
@@ -253,8 +264,9 @@ mkdir -p "${targeted_opencode_home}"
 HOME="${targeted_opencode_home}" PATH="${test_path}" \
 XDG_CONFIG_HOME="${targeted_opencode_home}/.config" \
 	"${root}/bootstrap.sh" open-code --configure-only >/dev/null
-rg -qF 'init -g --opencode --no-trust-filters' "${targeted_opencode_home}/rtk-calls"
-rg -q '^Tool routing:$' "${targeted_opencode_home}/.config/opencode/AGENTS.md"
+# Without --hook-only, `rtk init --opencode` also writes Claude Code's RTK.md.
+rg -qF 'init -g --opencode --hook-only --no-patch --no-trust-filters' "${targeted_opencode_home}/rtk-calls"
+rg -q '^Tool routing \(use instead of defaults\):$' "${targeted_opencode_home}/.config/opencode/AGENTS.md"
 rg -qF 'install --yes --target=opencode --location=global --no-permissions' "${targeted_opencode_home}/codegraph-calls"
 [ ! -e "${targeted_opencode_home}/.codex" ]
 
@@ -269,7 +281,7 @@ if rg -q '^install ' "${targeted_windsurf_home}/codegraph-calls"; then
 	exit 1
 fi
 rg -qx 'telemetry off' "${targeted_windsurf_home}/codegraph-calls"
-rg -qF 'Code graph: CodeGraph is a local graph of symbols, calls, and imports' "${targeted_windsurf_home}/.codeium/windsurf/memories/global_rules.md"
+rg -qF 'Code graph: index of symbols, calls, imports' "${targeted_windsurf_home}/.codeium/windsurf/memories/global_rules.md"
 
 language_home="${work}/language-home"
 mkdir -p "${language_home}/.cursor"
@@ -336,6 +348,22 @@ if "${root}/bootstrap.sh" language unknown --configure-only >/dev/null 2>&1; the
 	printf 'unknown language unexpectedly succeeded\n' >&2
 	exit 1
 fi
+
+# Without CodeGraph on PATH nothing else describes it, so the line stays.
+no_graph_home="${work}/no-graph-home"
+no_graph_bin="${work}/no-graph-bin"
+mkdir -p "${no_graph_home}" "${no_graph_bin}"
+cp "${fake_bin}/claude" "${fake_bin}/rtk" "${no_graph_bin}/"
+no_graph_path="${no_graph_bin}"
+while IFS= read -r dir; do
+	[ -x "${dir}/codegraph" ] || no_graph_path="${no_graph_path}:${dir}"
+done <<EOF
+$(printf '%s\n' "${PATH}" | tr ':' '\n')
+EOF
+HOME="${no_graph_home}" PATH="${no_graph_path}" \
+	XDG_CONFIG_HOME="${no_graph_home}/.config" \
+	"${root}/install.sh" --agent claude --configure-only >/dev/null
+rg -qF 'Code graph: index of symbols, calls, imports' "${no_graph_home}/.claude/CLAUDE.md"
 
 malformed_home="${work}/malformed-home"
 malformed_bin="${work}/malformed-bin"
@@ -504,7 +532,7 @@ rg -qx 'v9.9.9' "${binary_home}/.config/agent-ready/codegraph"
 rg -qF 'v9.9.9 install --yes --target=codex --location=global --no-permissions' \
 	"${binary_home}/codegraph-calls"
 rg -qF 'init -g --codex --no-trust-filters' "${binary_home}/binary-calls"
-rg -q '^Tool routing:$' "${binary_home}/.codex/AGENTS.md"
+rg -q '^Tool routing \(use instead of defaults\):$' "${binary_home}/.codex/AGENTS.md"
 rg -qF 'is not on PATH' "${work}/binaries.out"
 
 # A rerun needs no network at all.
