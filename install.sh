@@ -18,8 +18,10 @@ upgrade_tools=0
 binaries=0
 force=0
 dry_run=0
+uninstall=0
 usage() {
 	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose|<name>,...] [--configure-only|--upgrade] [--binaries] [--force] [--dry-run]\n' "$0" >&2
+	printf '       %s --uninstall [--force] [--dry-run]\n' "$0" >&2
 }
 
 while [ "$#" -gt 0 ]; do
@@ -49,6 +51,10 @@ while [ "$#" -gt 0 ]; do
 		dry_run=1
 		shift
 		;;
+	--uninstall)
+		uninstall=1
+		shift
+		;;
 	*)
 		usage
 		exit 2
@@ -58,6 +64,7 @@ done
 
 [ "${install_tools}" -eq 1 ] || { [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
 [ "${dry_run}" -eq 0 ] || { [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
+[ "${uninstall}" -eq 0 ] || { [ "${agent}" = auto ] && [ "${install_tools}" -eq 1 ] && [ "${upgrade_tools}" -eq 0 ] && [ "${binaries}" -eq 0 ]; } || { usage; exit 2; }
 
 # One name or a comma list, and every alias a selector list accepts resolves to
 # the canonical id used in blocks, receipts, and CodeGraph targets.
@@ -463,20 +470,43 @@ remove_block() {
 	target=$(resolve_target "${requested}")
 	[ -f "${target}" ] || return 0
 	state=$(block_state "${target}")
-	[ "${state}" != invalid ] || {
+	case "${state}" in
+	absent) return 0 ;;
+	present) ;;
+	*)
 		printf '%s: malformed agent-ready markers in %s\n' "${label}" "${requested}" >&2
 		return 1
-	}
-	[ "${state}" = present ] || return 0
+		;;
+	esac
 	tmp=$(mktemp "${target}.XXXXXX") || return 1
-	cp -p "${target}" "${tmp}"
+	cp -p "${target}" "${tmp}" || {
+		rm -f "${tmp}"
+		return 1
+	}
+	# Install writes one blank line before a block it appends; drop that same
+	# separator so the file returns to the bytes it had before the install.
 	awk -v s="${start}" -v e="${end}" '
-		$0 == s { skip = 1; next }
+		function flush() { if (have) print prev; have = 0 }
+		$0 == s {
+			if (have && prev == "") have = 0
+			else flush()
+			skip = 1
+			next
+		}
 		$0 == e { skip = 0; next }
-		!skip { print }
+		skip { next }
+		{
+			flush()
+			prev = $0
+			have = 1
+		}
+		END { flush() }
 	' "${target}" >"${tmp}"
-	mv "${tmp}" "${target}"
-	printf '%s: removed legacy routing block from %s\n' "${label}" "${requested}"
+	mv "${tmp}" "${target}" || {
+		rm -f "${tmp}"
+		return 1
+	}
+	printf '%s: removed routing block from %s\n' "${label}" "${requested}"
 }
 
 configure_rtk() {
@@ -567,6 +597,356 @@ configure_codegraph() {
 	codegraph telemetry off >/dev/null 2>&1 ||
 		printf 'CodeGraph: could not disable telemetry; run codegraph telemetry off\n' >&2
 }
+
+# ---------------------------------------------------------------- uninstall
+# Uninstall removes only what this repository wrote: the managed blocks, its
+# own Cursor hook entry, and agent-ready's state. Tools and third-party
+# configuration stay; the exact commands to remove them are printed instead.
+
+uninstall_bin_dir="${AGENT_READY_BIN_DIR:-${HOME}/.local/bin}"
+uninstall_versions_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-ready/versions"
+uninstall_launcher="${uninstall_bin_dir}/agent-ready"
+uninstall_agents=
+uninstall_receipt_present=0
+
+uninstall_launcher_owned() {
+	local target
+	[ -L "${uninstall_launcher}" ] || return 1
+	target=$(resolve_target "${uninstall_launcher}") || return 1
+	case "${target}" in
+	"${uninstall_versions_dir}"/*) return 0 ;;
+	esac
+	return 1
+}
+
+uninstall_cursor_entry_present() {
+	local hooks="${HOME}/.cursor/hooks.json"
+	[ -f "${hooks}" ] && grep -qF 'cat ./hooks/agent-ready-session-start.json' "${hooks}"
+}
+
+uninstall_cursor_present() {
+	local response="${HOME}/.cursor/hooks/agent-ready-session-start.json"
+	local legacy="${HOME}/.cursor/AGENTS.md" state
+	if [ -f "${response}" ] || [ -L "${response}" ]; then
+		return 0
+	fi
+	if [ -f "${legacy}" ] || [ -L "${legacy}" ]; then
+		state=$(block_state "${legacy}")
+		if [ "${state}" != absent ]; then
+			return 0
+		fi
+	fi
+	uninstall_cursor_entry_present
+}
+
+# The receipt's configured agents, plus every agent whose file still carries
+# agent-ready markers: an earlier install without a receipt, or one run with a
+# different --agent, may have left a block the receipt does not name.
+uninstall_collect_agents() {
+	local id path state
+	uninstall_agents=
+	for id in ${agent_ids}; do
+		if [ "${uninstall_receipt_present}" -eq 1 ]; then
+			case ",${receipt_configured}," in
+			*",${id},"*)
+				uninstall_agents="${uninstall_agents} ${id}"
+				continue
+				;;
+			esac
+		fi
+		if [ "${id}" = cursor ]; then
+			if uninstall_cursor_present; then
+				uninstall_agents="${uninstall_agents} ${id}"
+			fi
+			continue
+		fi
+		path=$(agent_instructions "${id}")
+		[ -f "${path}" ] || [ -L "${path}" ] || continue
+		state=$(block_state "${path}") || state=invalid
+		if [ "${state}" != absent ]; then
+			uninstall_agents="${uninstall_agents} ${id}"
+		fi
+	done
+}
+
+uninstall_preflight_instruction() {
+	local id="$1" label requested target state header digest
+	label=$(agent_label "${id}")
+	requested=$(agent_instructions "${id}")
+	[ -f "${requested}" ] || [ -L "${requested}" ] || return 0
+	target=$(resolve_target "${requested}") || {
+		preflight_blocked "${label}" "${requested}" other "unresolvable symlink"
+		return 0
+	}
+	[ -f "${target}" ] || return 0
+	state=$(block_state "${target}") || state=invalid
+	case "${state}" in
+	absent) ;;
+	invalid) preflight_blocked "${label}" "${requested}" markers "" ;;
+	present)
+		header=$(block_first_line "${target}")
+		if block_has_header "${header}"; then
+			digest="${header#* sha256:}"
+			digest="${digest%% -->*}"
+			if [ "${digest}" != "$(block_body_hash "${target}")" ] && [ "${force}" -eq 0 ]; then
+				preflight_blocked "${label}" "${requested}" edits ""
+				return 0
+			fi
+		fi
+		preflight_report "${label}" "would remove" "${requested}"
+		;;
+	esac
+}
+
+uninstall_preflight_cursor() {
+	local cursor_dir="${HOME}/.cursor" requested legacy response hooks target state header digest
+	legacy="${cursor_dir}/AGENTS.md"
+	if [ -f "${legacy}" ] || [ -L "${legacy}" ]; then
+		target=$(resolve_target "${legacy}") || target=
+		if [ -z "${target}" ]; then
+			preflight_blocked "Cursor" "${legacy}" other "unresolvable symlink"
+		elif [ -f "${target}" ]; then
+			state=$(block_state "${target}") || state=invalid
+			case "${state}" in
+			absent) ;;
+			invalid) preflight_blocked "Cursor" "${legacy}" markers "" ;;
+			present)
+				header=$(block_first_line "${target}")
+				if block_has_header "${header}"; then
+					digest="${header#* sha256:}"
+					digest="${digest%% -->*}"
+					if [ "${digest}" != "$(block_body_hash "${target}")" ] && [ "${force}" -eq 0 ]; then
+						preflight_blocked "Cursor" "${legacy}" edits ""
+					else
+						preflight_report "Cursor" "would remove legacy routing block from" "${legacy}"
+					fi
+				else
+					preflight_report "Cursor" "would remove legacy routing block from" "${legacy}"
+				fi
+				;;
+			esac
+		fi
+	fi
+	requested="${cursor_dir}/hooks.json"
+	if [ -f "${requested}" ] || [ -L "${requested}" ]; then
+		hooks=$(resolve_target "${requested}") || hooks=
+		if [ -z "${hooks}" ]; then
+			preflight_blocked "Cursor" "${requested}" other "unresolvable symlink"
+		elif ! command -v jq >/dev/null 2>&1; then
+			if uninstall_cursor_entry_present; then
+				preflight_blocked "Cursor" "${requested}" other "jq is required to edit hooks.json"
+			fi
+		elif ! jq -e -s '
+			length == 1
+			and (.[0] | type == "object")
+			and (((.[0].hooks // {}).sessionStart // []) | type) == "array"
+		' "${hooks}" >/dev/null 2>&1; then
+			preflight_blocked "Cursor" "${requested}" other "hooks.json must be a JSON object whose hooks.sessionStart is an array or absent"
+		elif jq -e --arg command 'cat ./hooks/agent-ready-session-start.json' \
+			'([.hooks.sessionStart[]? | select((type == "object") and (.command == $command))] | length) > 0' \
+			"${hooks}" >/dev/null 2>&1; then
+			preflight_report "Cursor" "would remove the session hook" "${requested}"
+		fi
+	fi
+	response="${cursor_dir}/hooks/agent-ready-session-start.json"
+	if [ -f "${response}" ] || [ -L "${response}" ]; then
+		preflight_report "Cursor" "would remove" "${response}"
+	fi
+}
+
+uninstall_remove_instruction() {
+	local id="$1" label requested target state
+	label=$(agent_label "${id}")
+	requested=$(agent_instructions "${id}")
+	[ -e "${requested}" ] || [ -L "${requested}" ] || return 0
+	target=$(resolve_target "${requested}") || return 1
+	[ -f "${target}" ] || return 0
+	state=$(block_state "${target}") || state=invalid
+	[ "${state}" = present ] || return 0
+	remove_block "${requested}" "${label}"
+}
+
+uninstall_remove_cursor() {
+	local cursor_dir="${HOME}/.cursor" requested response legacy hooks tmp
+	local command='cat ./hooks/agent-ready-session-start.json'
+	legacy="${cursor_dir}/AGENTS.md"
+	remove_block "${legacy}" "Cursor" || return 1
+
+	requested="${cursor_dir}/hooks.json"
+	if [ -e "${requested}" ] || [ -L "${requested}" ]; then
+		hooks=$(resolve_target "${requested}") || return 1
+		if [ -f "${hooks}" ] && command -v jq >/dev/null 2>&1 &&
+			jq -e --arg command "${command}" \
+				'([.hooks.sessionStart[]? | select((type == "object") and (.command == $command))] | length) > 0' \
+				"${hooks}" >/dev/null 2>&1; then
+			tmp=$(mktemp "${hooks}.XXXXXX") || return 1
+			cp -p "${hooks}" "${tmp}"
+			if ! jq --arg command "${command}" '
+				if type != "object" then error("hooks.json root must be an object") else . end
+				| .hooks = (.hooks // {})
+				| if ((.hooks.sessionStart // []) | type) != "array"
+					then error("hooks.sessionStart must be an array") else . end
+				| .hooks.sessionStart = ([.hooks.sessionStart[]?
+					| select((type != "object") or (.command != $command))])
+			' "${hooks}" >"${tmp}"; then
+				rm -f "${tmp}"
+				return 1
+			fi
+			mv "${tmp}" "${hooks}" || {
+				rm -f "${tmp}"
+				return 1
+			}
+			printf 'Cursor: removed the session hook from %s\n' "${requested}"
+		fi
+	fi
+
+	response="${cursor_dir}/hooks/agent-ready-session-start.json"
+	if [ -e "${response}" ] || [ -L "${response}" ]; then
+		rm -f -- "${response}"
+		printf 'Cursor: removed %s\n' "${response}"
+	fi
+}
+
+uninstall_action() {
+	local what="$1" path="$2"
+	if [ "${dry_run}" -eq 1 ]; then
+		printf 'would remove %s %s\n' "${what}" "${path}"
+	else
+		rm -rf -- "${path}"
+		printf 'removed %s %s\n' "${what}" "${path}"
+	fi
+}
+
+# The tool state files describe installs that are still useful on their own, so
+# they outlive the configuration they came with.
+uninstall_state_files() {
+	local config="$1" state bin keep
+	state="${config}/codegraph"
+	if [ -f "${state}" ]; then
+		if [ -e "${uninstall_bin_dir}/codegraph" ] || command -v codegraph >/dev/null 2>&1; then
+			printf 'keeping %s: codegraph is still installed\n' "${state}"
+		else
+			uninstall_action "codegraph state" "${state}"
+		fi
+	fi
+	state="${config}/binaries"
+	if [ -f "${state}" ]; then
+		keep=0
+		for bin in jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine; do
+			if [ -e "${uninstall_bin_dir}/${bin}" ]; then
+				keep=1
+				break
+			fi
+		done
+		if [ "${keep}" -eq 1 ]; then
+			printf 'keeping %s: its tools are still installed\n' "${state}"
+		else
+			uninstall_action "binaries state" "${state}"
+		fi
+	fi
+}
+
+uninstall_state() {
+	local receipt config
+	receipt=$(receipt_path)
+	config=$(dirname -- "${receipt}")
+	if [ -e "${receipt}" ] || [ -L "${receipt}" ]; then
+		uninstall_action "receipt" "${receipt}"
+	fi
+	if [ -e "${config}/languages" ] || [ -L "${config}/languages" ]; then
+		uninstall_action "languages state" "${config}/languages"
+	fi
+	if [ -L "${uninstall_launcher}" ]; then
+		if uninstall_launcher_owned; then
+			uninstall_action "launcher" "${uninstall_launcher}"
+		else
+			printf 'keeping %s: it was not installed by agent-ready\n' "${uninstall_launcher}"
+		fi
+	elif [ -e "${uninstall_launcher}" ]; then
+		printf 'keeping %s: it was not installed by agent-ready\n' "${uninstall_launcher}"
+	fi
+	uninstall_state_files "${config}"
+	# Last, because a release install runs this tree from inside it.
+	if [ -e "${uninstall_versions_dir}" ] || [ -L "${uninstall_versions_dir}" ]; then
+		uninstall_action "versions directory" "${uninstall_versions_dir}"
+	fi
+}
+
+uninstall_tools_hint() {
+	local mode tool bin formula names='' paths='' bundle
+	mode="${receipt_tools:-$(receipt_legacy_tools)}"
+	if [ "${mode}" = brew ]; then
+		for tool in rtk:rtk rg:ripgrep ast-grep:ast-grep sd:sd uv:uv jq:jq yq:yq mdq:mdq \
+			gh:gh wt:worktrunk difft:difftastic gitleaks:gitleaks actionlint:actionlint \
+			shellcheck:shellcheck hyperfine:hyperfine; do
+			bin="${tool%%:*}"
+			formula="${tool#*:}"
+			command -v "${bin}" >/dev/null 2>&1 || continue
+			names="${names}${names:+ }${formula}"
+		done
+		if [ -n "${names}" ]; then
+			printf '\nTools are still installed; agent-ready does not remove them:\n'
+			printf '  brew uninstall %s\n' "${names}"
+		fi
+	else
+		for bin in rtk rg ast-grep sd uv uvx jq yq mdq gh wt git-wt difft gitleaks \
+			actionlint shellcheck hyperfine gopls; do
+			[ ! -e "${uninstall_bin_dir}/${bin}" ] ||
+				paths="${paths}${paths:+ }${uninstall_bin_dir}/${bin}"
+		done
+		if [ -n "${paths}" ]; then
+			printf '\nTools are still installed; agent-ready does not remove them:\n'
+			printf '  rm %s\n' "${paths}"
+		fi
+	fi
+	bundle="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-ready/codegraph"
+	if [ -e "${bundle}" ] || [ -L "${uninstall_bin_dir}/codegraph" ]; then
+		printf '  codegraph bundle: rm -rf %s %s\n' "${bundle}" "${uninstall_bin_dir}/codegraph"
+	fi
+	printf '  RTK integration: rtk init -g --uninstall\n'
+	printf '  CodeGraph MCP wiring: codegraph uninstall --location global --keep-cli --target <agents>\n'
+}
+
+uninstall_main() {
+	local receipt id
+	blocked=0
+	receipt=$(receipt_path)
+	uninstall_receipt_present=0
+	if [ -e "${receipt}" ] || [ -L "${receipt}" ]; then
+		receipt_read "${receipt}" || return 1
+		uninstall_receipt_present=1
+	fi
+	uninstall_collect_agents
+	for id in ${uninstall_agents}; do
+		if [ "${id}" = cursor ]; then
+			uninstall_preflight_cursor
+		else
+			uninstall_preflight_instruction "${id}"
+		fi
+	done
+	if [ "${blocked}" -ne 0 ]; then
+		return 1
+	fi
+	if [ "${dry_run}" -eq 1 ]; then
+		uninstall_state
+		uninstall_tools_hint
+		return 0
+	fi
+	for id in ${uninstall_agents}; do
+		if [ "${id}" = cursor ]; then
+			uninstall_remove_cursor || return 1
+		else
+			uninstall_remove_instruction "${id}" || return 1
+		fi
+	done
+	uninstall_state
+	uninstall_tools_hint
+}
+
+if [ "${uninstall}" -eq 1 ]; then
+	uninstall_main
+	exit 0
+fi
 
 # Installing a tool is not the same as the agent using it. Measured on real
 # session transcripts, an agent reaches for the command it already knows —

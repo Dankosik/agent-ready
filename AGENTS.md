@@ -45,6 +45,11 @@ for people who run its installers against real machines and real agent configs.
   and never adds agents the user did not select. Tools are upgraded only with
   `--upgrade-tools`, and an update downloads and verifies the target release
   through `bootstrap.sh` rather than reusing the tree it replaces.
+- `agent-ready uninstall` removes only managed blocks, its own Cursor hook entry,
+  and agent-ready's own state (receipt, languages, launcher, versions); never
+  tool installs or third-party configuration. Tools are listed with their exact
+  removal commands instead, and a file agent-ready created is left empty rather
+  than deleted.
 - Installer tests must use an isolated temporary `HOME` and fake executables.
   Never run a development test against real agent configuration.
 - Keep repeated installation idempotent. Every new mutation path needs the
@@ -73,7 +78,7 @@ for people who run its installers against real machines and real agent configs.
 Run the checks that apply to the exact candidate. The full acceptance ladder is:
 
 ```bash
-rtk bash -n bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready
+rtk bash -c 'for f in bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready; do bash -n "$f"; done'
 rtk shellcheck bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready
 rtk actionlint
 rtk gitleaks dir --redact .

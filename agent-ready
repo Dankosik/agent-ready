@@ -2,7 +2,8 @@
 # agent-ready — the local command installed from a verified release.
 #
 # It owns the dispatch bootstrap.sh used to perform, and adds the verified
-# self-update, the read-only status and doctor views, and an offline rollback. A
+# self-update, the read-only status and doctor views, an offline rollback, and an
+# uninstall that removes only what it wrote. A
 # verified release installs its own tree under
 # ~/.local/share/agent-ready/versions/ and links only this launcher onto PATH,
 # the way the CodeGraph bundle does; a tree deleted there is replaced by the
@@ -12,7 +13,7 @@ set -euo pipefail
 
 usage() {
 	printf 'usage: %s [agent <name>|language <name>|<agent>] [installer options]\n' "$0" >&2
-	printf '       %s status|doctor|rollback|update\n' "$0" >&2
+	printf '       %s status|doctor|rollback|update|uninstall\n' "$0" >&2
 }
 
 die() {
@@ -677,6 +678,10 @@ dispatch() {
 		shift
 		update "$@"
 		;;
+	uninstall)
+		shift
+		bash "${root}/install.sh" --uninstall "$@"
+		;;
 	apply-update)
 		# Internal: bootstrap.sh hands this to the tree it just verified.
 		shift
@@ -705,9 +710,9 @@ if [ "${1:-}" = --self-install ]; then
 	self_install=1
 	shift
 fi
-# Read-only commands never install anything, even if the flag came along.
+# These commands manage or inspect an existing install; they never self-install.
 case "${1:-}" in
-status | doctor | rollback) self_install=0 ;;
+status | doctor | rollback | uninstall) self_install=0 ;;
 esac
 # apply-update --dry-run changes nothing, so it must not be self-installed
 # either; a real update always reaches it with --self-install.

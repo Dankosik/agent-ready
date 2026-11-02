@@ -1583,4 +1583,237 @@ rg -qF 'Use `go_workspace` only when the module/workspace layout is unclear' \
 [ ! -e "${lang_home}/.claude/CLAUDE.md" ]
 [ ! -e "${lang_home}/.gemini/GEMINI.md" ]
 
+# uninstall removes only what agent-ready wrote: the managed blocks, its own
+# Cursor hook entry, and agent-ready's state. Tools and third-party files stay.
+tree_digest() {
+	local dir="$1" path
+	{
+		find "${dir}" -type f | LC_ALL=C sort | while IFS= read -r path; do
+			printf 'f %s %s\n' "${path#"${dir}"}" "$(digest_of "${path}")"
+		done
+		find "${dir}" -type l | LC_ALL=C sort | while IFS= read -r path; do
+			printf 'l %s %s\n' "${path#"${dir}"}" "$(readlink "${path}")"
+		done
+	} | digest_stdin
+}
+run_uninstall_checkout() {
+	local home="$1"
+	shift
+	HOME="${home}" XDG_CONFIG_HOME="${home}/.config" \
+		XDG_DATA_HOME="${home}/.local/share" \
+		CLAUDE_CONFIG_DIR="${home}/.claude" \
+		CODEX_HOME="${home}/.codex" \
+		COPILOT_HOME="${home}/.copilot" \
+		GROK_HOME="${home}/.grok" \
+		QWEN_HOME="${home}/.qwen" \
+		CLINE_DATA_DIR="${home}/.cline/data" \
+		PATH="${test_path}" \
+		"${root}/install.sh" --uninstall "$@"
+}
+
+uninstall_home="${work}/uninstall-home"
+uninstall_bins="${work}/uninstall-bin"
+uninstall_versions="${uninstall_home}/.local/share/agent-ready/versions"
+uninstall_originals="${work}/uninstall-originals"
+mkdir -p "${uninstall_originals}" "${uninstall_home}/.claude" "${uninstall_home}/dotfiles" \
+	"${uninstall_home}/.codex" "${uninstall_home}/.gemini" "${uninstall_home}/.copilot" \
+	"${uninstall_home}/.grok/rules" "${uninstall_home}/.config/opencode" \
+	"${uninstall_home}/.qwen" "${uninstall_home}/.cline/data/settings/rules" \
+	"${uninstall_home}/.config/kilo" "${uninstall_home}/.config/crush" \
+	"${uninstall_home}/.config/goose" "${uninstall_home}/.cursor" \
+	"${uninstall_home}/.config/agent-ready/languages" "${uninstall_bins}"
+printf 'user claude\n' >"${uninstall_home}/dotfiles/CLAUDE.md"
+ln -s ../dotfiles/CLAUDE.md "${uninstall_home}/.claude/CLAUDE.md"
+printf 'user codex\n' >"${uninstall_home}/.codex/AGENTS.md"
+printf 'user gemini\n' >"${uninstall_home}/.gemini/GEMINI.md"
+printf 'user copilot\n' >"${uninstall_home}/.copilot/copilot-instructions.md"
+printf 'user grok\n' >"${uninstall_home}/.grok/rules/agent-ready.md"
+printf 'user opencode\n' >"${uninstall_home}/.config/opencode/AGENTS.md"
+printf 'user qwen\n' >"${uninstall_home}/.qwen/QWEN.md"
+printf 'user cline\n' >"${uninstall_home}/.cline/data/settings/rules/agent-ready.md"
+printf 'user kilo\n' >"${uninstall_home}/.config/kilo/AGENTS.md"
+printf 'user crush\n' >"${uninstall_home}/.config/crush/CRUSH.md"
+printf 'user goose\n' >"${uninstall_home}/.config/goose/AGENTS.md"
+printf 'enabled\n' >"${uninstall_home}/.config/agent-ready/languages/go"
+cat >"${uninstall_home}/.cursor/hooks.json" <<'EOF'
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{"command": "./hooks/existing.sh"}],
+    "stop": [{"command": "./hooks/stop.sh"}]
+  }
+}
+EOF
+uninstall_user_targets=(
+	"${uninstall_home}/.claude/CLAUDE.md"
+	"${uninstall_home}/.codex/AGENTS.md"
+	"${uninstall_home}/.gemini/GEMINI.md"
+	"${uninstall_home}/.copilot/copilot-instructions.md"
+	"${uninstall_home}/.grok/rules/agent-ready.md"
+	"${uninstall_home}/.config/opencode/AGENTS.md"
+	"${uninstall_home}/.qwen/QWEN.md"
+	"${uninstall_home}/.cline/data/settings/rules/agent-ready.md"
+	"${uninstall_home}/.config/kilo/AGENTS.md"
+	"${uninstall_home}/.config/crush/CRUSH.md"
+	"${uninstall_home}/.config/goose/AGENTS.md"
+)
+for target in "${uninstall_user_targets[@]}"; do
+	cp -p "${target}" "${uninstall_originals}/$(printf '%s' "${target}" | tr '/' '_')"
+done
+
+publish_agent_ready v9.9.4
+run_release "${uninstall_home}" "${uninstall_bins}" v9.9.4 "${test_path}" \
+	--agent claude,codex,cursor,gemini,copilot,windsurf,grok,opencode,qwen,cline,kilo,crush,goose \
+	--configure-only >"${work}/uninstall-install.out"
+[ -L "${uninstall_bins}/agent-ready" ]
+[ "$(readlink "${uninstall_bins}/agent-ready")" = "${uninstall_versions}/v9.9.4/agent-ready" ]
+[ -f "${uninstall_home}/.config/agent-ready/receipt" ]
+[ -f "${uninstall_home}/.codeium/windsurf/memories/global_rules.md" ]
+rg -qx 'languages=go' "${uninstall_home}/.config/agent-ready/receipt"
+
+# --dry-run reports every target and changes not one byte.
+uninstall_before=$(tree_digest "${uninstall_home}")
+run_cli "${uninstall_home}" "${uninstall_bins}" "${test_path}" uninstall --dry-run \
+	>"${work}/uninstall-dry.out"
+rg -q '^Codex: would remove ' "${work}/uninstall-dry.out"
+rg -q '^Cursor: would remove the session hook ' "${work}/uninstall-dry.out"
+rg -qF 'would remove receipt ' "${work}/uninstall-dry.out"
+rg -qF 'would remove languages state ' "${work}/uninstall-dry.out"
+rg -qF 'would remove versions directory ' "${work}/uninstall-dry.out"
+[ "$(tree_digest "${uninstall_home}")" = "${uninstall_before}" ]
+
+# A local edit inside a block stops the run before anything is removed, and
+# --force is the explicit way past it.
+uninstall_edit_home="${work}/uninstall-edit-home"
+mkdir -p "${uninstall_edit_home}/.codex"
+printf 'user codex\n' >"${uninstall_edit_home}/.codex/AGENTS.md"
+cp "${uninstall_edit_home}/.codex/AGENTS.md" "${work}/uninstall-edit-original"
+run_uninstall_checkout_install() {
+	local home="$1"
+	shift
+	HOME="${home}" XDG_CONFIG_HOME="${home}/.config" \
+		CODEX_HOME="${home}/.codex" PATH="${test_path}" \
+		"${root}/install.sh" --configure-only "$@"
+}
+run_uninstall_checkout_install "${uninstall_edit_home}" --agent codex >/dev/null
+sed 's/^- Shell:.*/- Shell: local edit that uninstall must not remove./' \
+	"${uninstall_edit_home}/.codex/AGENTS.md" >"${work}/uninstall-edit-file"
+cp "${work}/uninstall-edit-file" "${uninstall_edit_home}/.codex/AGENTS.md"
+uninstall_edit_before=$(digest_of "${uninstall_edit_home}/.codex/AGENTS.md")
+uninstall_edit_status=0
+run_uninstall_checkout "${uninstall_edit_home}" >"${work}/uninstall-edit.out" 2>&1 ||
+	uninstall_edit_status=$?
+[ "${uninstall_edit_status}" -eq 1 ]
+rg -qF 'has local edits inside the agent-ready block' "${work}/uninstall-edit.out"
+rg -qF "${uninstall_edit_home}/.codex/AGENTS.md" "${work}/uninstall-edit.out"
+[ "$(digest_of "${uninstall_edit_home}/.codex/AGENTS.md")" = "${uninstall_edit_before}" ]
+[ -f "${uninstall_edit_home}/.config/agent-ready/receipt" ]
+run_uninstall_checkout "${uninstall_edit_home}" --force >/dev/null
+[ "$(digest_of "${uninstall_edit_home}/.codex/AGENTS.md")" = "$(digest_of "${work}/uninstall-edit-original")" ]
+[ ! -e "${uninstall_edit_home}/.config/agent-ready/receipt" ]
+
+# Malformed markers are reported for every target, never half-removed.
+uninstall_bad_home="${work}/uninstall-bad-home"
+mkdir -p "${uninstall_bad_home}/.codex" "${uninstall_bad_home}/.gemini"
+printf 'user codex\n<!-- agent-ready:start -->\nbroken block\n' >"${uninstall_bad_home}/.codex/AGENTS.md"
+printf 'user gemini\n<!-- agent-ready:start -->\nbroken block\n' >"${uninstall_bad_home}/.gemini/GEMINI.md"
+cp "${uninstall_bad_home}/.codex/AGENTS.md" "${work}/uninstall-bad-codex"
+cp "${uninstall_bad_home}/.gemini/GEMINI.md" "${work}/uninstall-bad-gemini"
+uninstall_bad_status=0
+run_uninstall_checkout "${uninstall_bad_home}" >"${work}/uninstall-bad.out" 2>&1 ||
+	uninstall_bad_status=$?
+[ "${uninstall_bad_status}" -eq 1 ]
+rg -qF "${uninstall_bad_home}/.codex/AGENTS.md" "${work}/uninstall-bad.out"
+rg -qF "${uninstall_bad_home}/.gemini/GEMINI.md" "${work}/uninstall-bad.out"
+cmp -s "${work}/uninstall-bad-codex" "${uninstall_bad_home}/.codex/AGENTS.md"
+cmp -s "${work}/uninstall-bad-gemini" "${uninstall_bad_home}/.gemini/GEMINI.md"
+
+# A block the receipt does not name, such as one left by a v1.2.x install, is
+# still removed.
+uninstall_mixed_home="${work}/uninstall-mixed-home"
+mkdir -p "${uninstall_mixed_home}/.codex" "${uninstall_mixed_home}/.gemini"
+printf 'user codex\n' >"${uninstall_mixed_home}/.codex/AGENTS.md"
+printf 'user gemini\n\n<!-- agent-ready:start -->\nlegacy routing\n<!-- agent-ready:end -->\n' \
+	>"${uninstall_mixed_home}/.gemini/GEMINI.md"
+run_uninstall_checkout_install "${uninstall_mixed_home}" --agent codex >/dev/null
+rg -qx 'configured=codex' "${uninstall_mixed_home}/.config/agent-ready/receipt"
+run_uninstall_checkout "${uninstall_mixed_home}" >/dev/null
+[ "$(cat "${uninstall_mixed_home}/.codex/AGENTS.md")" = 'user codex' ]
+[ "$(cat "${uninstall_mixed_home}/.gemini/GEMINI.md")" = 'user gemini' ]
+
+# The real run restores every user file, keeps only the other Cursor hooks, and
+# removes the receipt, the launcher, and the versions directory.
+run_cli "${uninstall_home}" "${uninstall_bins}" "${test_path}" uninstall \
+	>"${work}/uninstall.out"
+for target in "${uninstall_user_targets[@]}"; do
+	cmp -s "${target}" "${uninstall_originals}/$(printf '%s' "${target}" | tr '/' '_')" || {
+		printf 'uninstall did not restore %s\n' "${target}" >&2
+		exit 1
+	}
+done
+[ -L "${uninstall_home}/.claude/CLAUDE.md" ]
+[ -f "${uninstall_home}/.codeium/windsurf/memories/global_rules.md" ]
+[ ! -s "${uninstall_home}/.codeium/windsurf/memories/global_rules.md" ]
+jq -e '
+	.version == 1 and
+	.hooks.stop[0].command == "./hooks/stop.sh" and
+	([.hooks.sessionStart[] | select(.command == "./hooks/existing.sh")] | length) == 1 and
+	([.hooks.sessionStart[] | select(.command == "cat ./hooks/agent-ready-session-start.json")] | length) == 0
+' "${uninstall_home}/.cursor/hooks.json" >/dev/null
+[ ! -e "${uninstall_home}/.cursor/hooks/agent-ready-session-start.json" ]
+[ ! -e "${uninstall_home}/.config/agent-ready/receipt" ]
+[ ! -e "${uninstall_home}/.config/agent-ready/languages" ]
+[ ! -e "${uninstall_versions}" ]
+[ ! -L "${uninstall_bins}/agent-ready" ]
+[ ! -e "${uninstall_bins}/agent-ready" ]
+rg -qF 'removed receipt ' "${work}/uninstall.out"
+rg -qF 'removed versions directory ' "${work}/uninstall.out"
+rg -qF 'rtk init -g --uninstall' "${work}/uninstall.out"
+rg -qF 'codegraph uninstall' "${work}/uninstall.out"
+
+# A second uninstall has nothing left to do and still exits 0.
+uninstall_second_status=0
+run_uninstall_checkout "${uninstall_home}" >"${work}/uninstall-second.out" 2>&1 ||
+	uninstall_second_status=$?
+[ "${uninstall_second_status}" -eq 0 ]
+[ ! -e "${uninstall_home}/.config/agent-ready/receipt" ]
+rg -qF 'brew uninstall ' "${work}/uninstall-second.out"
+
+# A launcher agent-ready did not create is kept, while its own tree and receipt
+# still go.
+foreign_uninstall_tree="${foreign_home}/.local/share/agent-ready/versions/v9.9.0/agent-ready"
+HOME="${foreign_home}" XDG_CONFIG_HOME="${foreign_home}/.config" \
+	XDG_DATA_HOME="${foreign_home}/.local/share" \
+	AGENT_READY_BIN_DIR="${foreign_bins}" PATH="${test_path}" \
+	bash "${foreign_uninstall_tree}" uninstall >"${work}/uninstall-foreign.out"
+cmp -s "${work}/foreign-before" "${foreign_bins}/agent-ready"
+[ ! -e "${foreign_home}/.local/share/agent-ready/versions" ]
+[ ! -e "${foreign_home}/.config/agent-ready/receipt" ]
+rg -qF "keeping ${foreign_bins}/agent-ready: it was not installed by agent-ready" \
+	"${work}/uninstall-foreign.out"
+
+# The tool state files outlive the configuration while their tools are there.
+uninstall_state_home="${work}/uninstall-state-home"
+uninstall_state_config="${uninstall_state_home}/.config/agent-ready"
+mkdir -p "${uninstall_state_home}/.local/bin" "${uninstall_state_config}"
+for bin in rg codegraph; do
+	printf '#!/bin/sh\nexit 0\n' >"${uninstall_state_home}/.local/bin/${bin}"
+	chmod +x "${uninstall_state_home}/.local/bin/${bin}"
+done
+printf 'ripgrep v1.0.0\n' >"${uninstall_state_config}/binaries"
+printf 'v9.9.9\n' >"${uninstall_state_config}/codegraph"
+HOME="${uninstall_state_home}" XDG_CONFIG_HOME="${uninstall_state_home}/.config" \
+	PATH="${base_bin}" "${root}/install.sh" --uninstall >"${work}/uninstall-state.out"
+[ -f "${uninstall_state_config}/binaries" ]
+[ -f "${uninstall_state_config}/codegraph" ]
+rg -qF 'keeping ' "${work}/uninstall-state.out"
+rg -qF 'binaries: its tools are still installed' "${work}/uninstall-state.out"
+rg -qF 'codegraph: codegraph is still installed' "${work}/uninstall-state.out"
+rg -qF "rm ${uninstall_state_home}/.local/bin/rg" "${work}/uninstall-state.out"
+rm -f "${uninstall_state_home}/.local/bin/rg" "${uninstall_state_home}/.local/bin/codegraph"
+HOME="${uninstall_state_home}" XDG_CONFIG_HOME="${uninstall_state_home}/.config" \
+	PATH="${base_bin}" "${root}/install.sh" --uninstall >"${work}/uninstall-state.out"
+[ ! -e "${uninstall_state_config}/binaries" ]
+[ ! -e "${uninstall_state_config}/codegraph" ]
+
 printf 'installer routing checks passed\n'

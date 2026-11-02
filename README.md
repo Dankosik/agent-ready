@@ -335,6 +335,34 @@ After the update, start a new agent session to load the updated instructions.
 `agent-ready rollback` returns to the previous release when the update is not
 what you wanted.
 
+## Uninstall
+
+`agent-ready uninstall` removes the configuration agent-ready wrote and nothing
+else:
+
+```bash
+agent-ready uninstall           # remove managed configuration and state
+agent-ready uninstall --dry-run # report the plan and change nothing
+agent-ready uninstall --force   # remove a block that has local edits
+```
+
+It targets every agent in the receipt's `configured` list or, without a receipt,
+every instruction file that still carries agent-ready markers. For each one it
+removes only the block between `agent-ready:start` and `agent-ready:end`; Cursor
+loses only its entry in `~/.cursor/hooks.json` and
+`~/.cursor/hooks/agent-ready-session-start.json`. It then removes the receipt,
+`~/.config/agent-ready/languages/`, the launcher only when it is agent-ready's
+own symlink, and `~/.local/share/agent-ready/versions/`. A file agent-ready
+created is left in place (empty) rather than deleted, and a block with local
+edits stops the run and is named unless you pass `--force`.
+
+Installed tools are not removed. The command lists what is still installed and
+prints the exact removal commands, including `rtk init -g --uninstall` for the
+RTK integration and `codegraph uninstall` for the CodeGraph MCP wiring; those
+belong to those tools. The `binaries` and `codegraph` state files stay while the
+tools they describe are installed. From a checkout, `./install.sh --uninstall`
+does the same.
+
 ## The `agent-ready` command
 
 Installing from a release also leaves a local `agent-ready` command, laid out
@@ -359,6 +387,7 @@ agent-ready language go            # add Go support
 agent-ready status                 # tree, launcher, receipt, and drift
 agent-ready doctor                 # ok/problem for the install and every tool
 agent-ready rollback               # reinstall the newest kept older release
+agent-ready uninstall              # remove only what agent-ready wrote
 ```
 
 `status` prints the installed version, the launcher target, the receipt fields,
