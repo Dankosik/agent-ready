@@ -70,7 +70,10 @@ package manager:
 - binaries go to `~/.local/bin` (override with `AGENT_READY_BIN_DIR`), so no
   `sudo` is needed, and it also works as root in a container;
 - static builds are used where upstream publishes them; `mdq` publishes no
-  arm64 Linux build and is skipped there.
+  arm64 Linux build and is skipped there;
+- if the latest release lacks the Linux build (for example, its upstream build
+  failed), the newest stable release among the last 30 that has it is used, and
+  the installer says which one.
 
 If Homebrew is already installed, it is used as before. Pass `--binaries` to use
 release binaries anyway. Add `~/.local/bin` to `PATH` if the installer says it
