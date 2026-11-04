@@ -91,12 +91,12 @@ mkdir -p "${bin_dir}" "${state_dir}"
 
 # The token is only ever sent to the real GitHub API, never to an override.
 fetch() {
-	local url="$1" out="$2" code token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-	local auth=()
+	local url="$1" out="$2" code token="${GITHUB_TOKEN:-${GH_TOKEN:-}}" auth=
+	# On curl's stdin, because its arguments are visible to every local process.
 	case "${url}" in
-	https://api.github.com/*) [ -z "${token}" ] || auth=(-H "Authorization: Bearer ${token}") ;;
+	https://api.github.com/*) [ -z "${token}" ] || auth="header = \"Authorization: Bearer ${token}\"" ;;
 	esac
-	code=$(curl -sSL --retry 3 ${auth[@]+"${auth[@]}"} -w '%{http_code}' -o "${out}" "${url}") ||
+	code=$(printf '%s\n' "${auth}" | curl -sSL --retry 3 -K - -w '%{http_code}' -o "${out}" "${url}") ||
 		die "download failed: ${url}"
 	case "${code}" in
 	200 | 000) ;;

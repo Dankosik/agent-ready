@@ -54,12 +54,12 @@ release_repo=Dankosik/agent-ready
 # Same download and token rule as bootstrap.sh: the token only ever goes to the
 # real GitHub API, never to an override.
 fetch() {
-	local url="$1" out="$2" code token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-	local auth=()
+	local url="$1" out="$2" code token="${GITHUB_TOKEN:-${GH_TOKEN:-}}" auth=
+	# On curl's stdin, because its arguments are visible to every local process.
 	case "${url}" in
-	https://api.github.com/*) [ -z "${token}" ] || auth=(-H "Authorization: Bearer ${token}") ;;
+	https://api.github.com/*) [ -z "${token}" ] || auth="header = \"Authorization: Bearer ${token}\"" ;;
 	esac
-	code=$(curl -sSL --retry 3 ${auth[@]+"${auth[@]}"} -w '%{http_code}' -o "${out}" "${url}") ||
+	code=$(printf '%s\n' "${auth}" | curl -sSL --retry 3 -K - -w '%{http_code}' -o "${out}" "${url}") ||
 		die "download failed: ${url}"
 	case "${code}" in
 	200 | 000) ;;
@@ -217,7 +217,7 @@ doctor_problem() {
 doctor() {
 	local receipt tools tool target out dry_status=0
 	doctor_failed=0
-	tools='rtk rg ast-grep sd uv jq yq gh wt difft gitleaks actionlint shellcheck hyperfine codegraph'
+	tools='rtk rg ast-grep sd uv jq yq gh wt difft gitleaks actionlint shellcheck hyperfine osv-scanner codegraph'
 	receipt=$(receipt_path)
 	if [ -f "${receipt}" ]; then
 		if receipt_read "${receipt}" 2>/dev/null; then
@@ -268,6 +268,65 @@ doctor() {
 	[ "${doctor_failed}" -eq 0 ]
 }
 
+# The agents each older release's strict receipt reader rejects. A receipt naming
+# one stops that release before it changes anything, so a downgrade narrows the
+# receipt first. Add a line here whenever a release adds an agent.
+agents_unknown_to() {
+	if version_lt "$1" v1.5.0; then
+		printf 'antigravity dsh pi\n'
+	fi
+}
+
+list_without() {
+	printf '%s\n' "$1" | tr ',' '\n' |
+		awk -v drop=" $2 " 'NF && index(drop, " " $0 " ") == 0 { if (n++) printf ","; printf "%s", $0 }'
+}
+
+# Sets narrowed_agents and narrowed_configured for this receipt on that release.
+narrowed_agents=
+narrowed_configured=
+narrow_for_release() {
+	local unknown
+	unknown=$(agents_unknown_to "$1")
+	narrowed_agents="${receipt_agents}"
+	narrowed_configured=$(list_without "${receipt_configured}" "${unknown}")
+	if [ -n "${receipt_agents}" ] && [ "${receipt_agents}" != auto ]; then
+		narrowed_agents=$(list_without "${receipt_agents}" "${unknown}")
+		[ -n "${narrowed_agents}" ] ||
+			die "agent-ready $1 supports none of this install's agents (${receipt_agents}); nothing changed"
+	fi
+}
+
+narrowing_needed() {
+	[ "${narrowed_agents}" != "${receipt_agents}" ] || [ "${narrowed_configured}" != "${receipt_configured}" ]
+}
+
+receipt_backup=
+narrow_receipt() {
+	local file
+	narrow_for_release "$1"
+	narrowing_needed || return 0
+	file=$(receipt_path)
+	receipt_backup=$(mktemp "${file}.XXXXXX")
+	cp -p "${file}" "${receipt_backup}"
+	printf 'agent-ready %s does not know every configured agent; their routing blocks stay until a newer release\n' "$1"
+	receipt_write "${file}" "${receipt_version}" "${narrowed_agents}" "${narrowed_configured}" \
+		"${receipt_languages}" "${receipt_tools}"
+	receipt_read "${file}"
+}
+
+restore_receipt() {
+	[ -n "${receipt_backup}" ] || return 0
+	mv -f "${receipt_backup}" "$(receipt_path)"
+	receipt_backup=
+}
+
+discard_receipt_backup() {
+	[ -n "${receipt_backup}" ] || return 0
+	rm -f "${receipt_backup}"
+	receipt_backup=
+}
+
 # Offline downgrade: the receipt names the current version, and the highest kept
 # version below it is reinstalled with the receipt's own agents.
 rollback() {
@@ -294,8 +353,13 @@ rollback() {
 			die "refusing to replace ${launcher}; it was not installed by agent-ready"
 	fi
 	printf 'Rolling back to agent-ready %s\n' "${target}"
+	narrow_receipt "${target}"
 	receipt_agent_args
-	bash "${versions_dir}/${target}/install.sh" --configure-only ${repeat_args[@]+"${repeat_args[@]}"}
+	if ! bash "${versions_dir}/${target}/install.sh" --configure-only ${repeat_args[@]+"${repeat_args[@]}"}; then
+		restore_receipt
+		die "rollback to ${target} failed; the launcher was not moved"
+	fi
+	discard_receipt_backup
 	link_launcher "${versions_dir}/${target}"
 	printf 'agent-ready %s is now the launcher default\n' "${target}"
 }
@@ -362,7 +426,8 @@ latest_release() {
 print_release_notes() {
 	local tag="$1" json="$2" body
 	printf 'Release notes: https://github.com/%s/releases/tag/%s\n' "${release_repo}" "${tag}"
-	if fetch "${release_api}/repos/${release_repo}/releases/tags/${tag}" "${json}" 2>/dev/null &&
+	# A subshell, because fetch exits on failure rather than returning.
+	if (fetch "${release_api}/repos/${release_repo}/releases/tags/${tag}" "${json}") 2>/dev/null &&
 		body=$(jq -r '.body // empty' "${json}" 2>/dev/null) && [ -n "${body}" ]; then
 		printf '%s\n' "${body}" | awk 'NR <= 15'
 	fi
@@ -382,7 +447,7 @@ run_migrations() {
 				printf '%s\n' "${name}"
 			fi
 		done |
-			awk -F'[.-]' '{ printf "%08d %08d %08d %s\n", $2, $3, $4, $0 }' |
+			awk -F'[.-]' '{ printf "%08d %08d %08d %s\n", substr($1, 2), $2, $3, $0 }' |
 			sort | cut -d' ' -f4-
 	) || die "cannot read migrations in ${dir}"
 	while IFS= read -r name; do
@@ -418,8 +483,9 @@ apply_install() {
 		args+=(--configure-only)
 		;;
 	binaries)
+		# Without the flag, a Homebrew installed since would change the tool mode.
 		os="${AGENT_READY_OS:-$(uname -s)}"
-		[ "${os}" = Linux ] || args+=(--binaries)
+		[ "${os}" != Linux ] || args+=(--binaries)
 		;;
 	esac
 	[ "${upgrade}" -eq 0 ] || args+=(--upgrade)
@@ -567,6 +633,16 @@ update() {
 
 	if [ "${cur}" != none ] && [ -n "${explicit}" ] && version_lt "${target}" "${cur}"; then
 		printf 'Downgrading agent-ready %s → %s\n' "${cur}" "${target}"
+		if [ "${dry}" -eq 1 ]; then
+			narrow_for_release "${target}"
+			if narrowing_needed; then
+				printf 'agent-ready %s does not know every configured agent, so its installer cannot read this receipt until the downgrade narrows it to agents=%s; nothing changed\n' \
+					"${target}" "${narrowed_agents}"
+				return 0
+			fi
+		else
+			narrow_receipt "${target}"
+		fi
 	else
 		printf 'Updating agent-ready %s → %s\n' "${cur}" "${target}"
 	fi
@@ -576,8 +652,12 @@ update() {
 	[ "${force_install}" -eq 0 ] || args+=(--force)
 	# The ref makes bootstrap fetch the target release instead of rerunning this
 	# tree; the API override travels with it so both resolve against the same one.
-	AGENT_READY_REF="${target}" AGENT_READY_GITHUB_API="${release_api}" \
-		bash "${root}/bootstrap.sh" "${args[@]}"
+	if ! AGENT_READY_REF="${target}" AGENT_READY_GITHUB_API="${release_api}" \
+		bash "${root}/bootstrap.sh" "${args[@]}"; then
+		restore_receipt
+		exit 1
+	fi
+	discard_receipt_backup
 	print_release_notes "${target}" "${update_work}/target.json"
 }
 
@@ -696,7 +776,7 @@ dispatch() {
 		shift
 		apply_update "$@"
 		;;
-	--agent | --configure-only | --upgrade | --binaries)
+	--agent | --configure-only | --upgrade | --binaries | --force | --dry-run)
 		bash "${root}/install.sh" "$@"
 		;;
 	*)
@@ -723,13 +803,11 @@ fi
 case "${1:-}" in
 status | doctor | rollback | uninstall) self_install=0 ;;
 esac
-# apply-update --dry-run changes nothing, so it must not be self-installed
-# either; a real update always reaches it with --self-install.
-if [ "${1:-}" = apply-update ]; then
-	for arg in "$@"; do
-		[ "${arg}" != --dry-run ] || self_install=0
-	done
-fi
+# A dry run changes nothing, whichever command carries it, so it must not
+# self-install either; a real update always reaches apply-update with --self-install.
+for arg in "$@"; do
+	[ "${arg}" != --dry-run ] || self_install=0
+done
 
 dispatch "$@"
 

@@ -141,18 +141,38 @@ pi_instructions() {
 	printf '%s\n' "${dir}/AGENTS.md"
 }
 
+# Codex reads the first non-empty one of these, so an override hides AGENTS.md.
+codex_instructions() {
+	local dir="${CODEX_HOME:-${HOME}/.codex}"
+	if [ -s "${dir}/AGENTS.override.md" ]; then
+		printf '%s\n' "${dir}/AGENTS.override.md"
+	else
+		printf '%s\n' "${dir}/AGENTS.md"
+	fi
+}
+
+# Windsurf became Devin Desktop, which documents ~/.devin/global_rules.md. A
+# machine with only the older app's data stays on the file that app reads.
+windsurf_instructions() {
+	if [ ! -d "${HOME}/.devin" ] && [ -d "${HOME}/.codeium/windsurf" ]; then
+		printf '%s\n' "${HOME}/.codeium/windsurf/memories/global_rules.md"
+	else
+		printf '%s\n' "${HOME}/.devin/global_rules.md"
+	fi
+}
+
 agent_instructions() {
 	case "$1" in
 	claude) printf '%s\n' "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" ;;
-	codex) printf '%s\n' "${CODEX_HOME:-${HOME}/.codex}/AGENTS.md" ;;
+	codex) codex_instructions ;;
 	# Antigravity shares Gemini CLI's global file.
 	gemini | antigravity) printf '%s\n' "${HOME}/.gemini/GEMINI.md" ;;
 	copilot) printf '%s\n' "${COPILOT_HOME:-${HOME}/.copilot}/copilot-instructions.md" ;;
-	windsurf) printf '%s\n' "${HOME}/.codeium/windsurf/memories/global_rules.md" ;;
+	windsurf) windsurf_instructions ;;
 	grok) printf '%s\n' "${GROK_HOME:-${HOME}/.grok}/rules/agent-ready.md" ;;
 	opencode) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" ;;
 	qwen) printf '%s\n' "${QWEN_HOME:-${HOME}/.qwen}/QWEN.md" ;;
-	cline) printf '%s\n' "${CLINE_DATA_DIR:-${HOME}/.cline/data}/settings/rules/agent-ready.md" ;;
+	cline) printf '%s\n' "${CLINE_DIR:-${HOME}/.cline}/rules/agent-ready.md" ;;
 	kilo) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/kilo/AGENTS.md" ;;
 	crush) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/crush/CRUSH.md" ;;
 	goose) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/goose/AGENTS.md" ;;
@@ -161,11 +181,50 @@ agent_instructions() {
 	esac
 }
 
+# Files an earlier run may have written for this agent. The agent no longer
+# reads a block left in one, so install moves it and uninstall still finds it.
+agent_stale_candidates() {
+	local dir name
+	case "$1" in
+	codex)
+		dir="${CODEX_HOME:-${HOME}/.codex}"
+		printf '%s\n' "${dir}/AGENTS.override.md" "${dir}/AGENTS.md"
+		;;
+	windsurf)
+		printf '%s\n' "${HOME}/.devin/global_rules.md" "${HOME}/.codeium/windsurf/memories/global_rules.md"
+		;;
+	# Before v1.5.0 the block went where Cline CLI never loaded it.
+	cline) printf '%s\n' "${CLINE_DATA_DIR:-${HOME}/.cline/data}/settings/rules/agent-ready.md" ;;
+	pi)
+		dir="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}"
+		for name in AGENTS.override.md AGENTS.md AGENTS.MD CLAUDE.md CLAUDE.MD; do
+			printf '%s\n' "${dir}/${name}"
+		done
+		;;
+	esac
+}
+
+# -ef because AGENTS.md and AGENTS.MD are one file on a case-insensitive disk.
+agent_stale_instructions() {
+	local active path
+	active=$(agent_instructions "$1")
+	while IFS= read -r path; do
+		[ "${path}" = "${active}" ] || [ "${path}" -ef "${active}" ] || printf '%s\n' "${path}"
+	done < <(agent_stale_candidates "$1")
+}
+
 # `codegraph install` writes its own CodeGraph section into these four agents'
 # files, so their agent-ready block leaves out the Code graph line.
 agent_block() {
 	case "$1" in
-	claude | codex | gemini | opencode) printf '%s\n' "${graph_routing}" ;;
+	claude | gemini | opencode) printf '%s\n' "${graph_routing}" ;;
+	# CodeGraph writes its section to AGENTS.md, which an override hides.
+	codex)
+		case "$(codex_instructions)" in
+		*/AGENTS.md) printf '%s\n' "${graph_routing}" ;;
+		*) printf '%s\n' "${routing}" ;;
+		esac
+		;;
 	# CodeGraph's Antigravity target writes only MCP config, so the shared file
 	# gets its section only through Gemini: an explicit gemini, or auto, which
 	# wires Gemini whenever ~/.gemini exists. Both ids must render one block.
@@ -195,7 +254,7 @@ detect_antigravity() {
 }
 detect_copilot() { command -v copilot >/dev/null 2>&1; }
 detect_windsurf() {
-	command -v windsurf >/dev/null 2>&1 ||
+	command -v windsurf >/dev/null 2>&1 || [ -d "${HOME}/.devin" ] ||
 		[ -d /Applications/Windsurf.app ] || [ -d "${HOME}/Applications/Windsurf.app" ]
 }
 detect_grok() { command -v grok >/dev/null 2>&1; }
@@ -273,8 +332,13 @@ block_state() {
 	awk -v s="${start}" -v e="${end}" '
 		$0 == s { starts++; start_line = NR }
 		$0 == e { ends++; end_line = NR }
+		{
+			line = $0
+			if (sub(/\r$/, "", line) && (line == s || line == e)) crlf = 1
+		}
 		END {
-			if (starts == 0 && ends == 0) print "absent"
+			if (crlf) print "invalid"
+			else if (starts == 0 && ends == 0) print "absent"
 			else if (starts == 1 && ends == 1 && start_line < end_line) print "present"
 			else print "invalid"
 		}
@@ -310,6 +374,16 @@ block_body_hash() {
 
 block_has_header() {
 	printf '%s\n' "$1" | grep -Eq '^<!-- agent-ready v[^ ]+ sha256:[0-9a-f]{64} -->$'
+}
+
+# Whether the block no longer matches the fingerprint in its own header.
+block_has_local_edits() {
+	local header digest
+	header=$(block_first_line "$1")
+	block_has_header "${header}" || return 1
+	digest="${header#* sha256:}"
+	digest="${digest%% -->*}"
+	[ "${digest}" != "$(block_body_hash "$1")" ]
 }
 
 sha256_stdin() {
@@ -360,6 +434,10 @@ preflight_instruction() {
 		preflight_blocked "${label}" "${requested}" other "unresolvable symlink"
 		return 0
 	}
+	if [ -e "${target}" ] && [ ! -f "${target}" ]; then
+		preflight_blocked "${label}" "${requested}" other "not a regular file"
+		return 0
+	fi
 	if [ ! -f "${target}" ]; then
 		preflight_report "${label}" "would add" "${requested}"
 		return 0
@@ -396,12 +474,41 @@ preflight_instruction() {
 	esac
 }
 
+# A block install is about to move must be just as safe to remove as to replace.
+preflight_stale() {
+	local id="$1" label path state
+	label=$(agent_label "${id}")
+	while IFS= read -r path; do
+		[ -f "${path}" ] || continue
+		state=$(block_state "${path}")
+		case "${state}" in
+		absent) ;;
+		invalid) preflight_blocked "${label}" "${path}" markers "" ;;
+		present)
+			if [ "${force}" -eq 0 ] && block_has_local_edits "${path}"; then
+				preflight_blocked "${label}" "${path}" edits ""
+			else
+				preflight_report "${label}" "would remove the stale block from" "${path}"
+			fi
+			;;
+		esac
+	done < <(agent_stale_instructions "${id}")
+}
+
+retire_stale() {
+	local id="$1" label path
+	label=$(agent_label "${id}")
+	while IFS= read -r path; do
+		remove_block "${path}" "${label}"
+	done < <(agent_stale_instructions "${id}")
+}
+
 preflight_cursor() {
 	local label="Cursor" cursor_dir="${HOME}/.cursor" requested legacy state=absent hooks response current=1
 	requested="${cursor_dir}/hooks.json"
 	legacy="${cursor_dir}/AGENTS.md"
 	response="${cursor_dir}/hooks/agent-ready-session-start.json"
-	if [ -e "${legacy}" ] || [ -L "${legacy}" ]; then
+	if [ -f "${legacy}" ]; then
 		state=$(block_state "${legacy}")
 		[ "${state}" != invalid ] || preflight_blocked "${label}" "${legacy}" markers ""
 	fi
@@ -454,6 +561,7 @@ preflight_all() {
 			preflight_cursor
 		else
 			preflight_instruction "$(agent_label "${id}")" "$(agent_instructions "${id}")" "$(agent_block "${id}")"
+			preflight_stale "${id}"
 		fi
 	done
 }
@@ -612,7 +720,6 @@ install_cursor_hook() {
 		rm -f "${tmp}"
 		printf 'Cursor: routing hook already configured in %s\n' "${requested}"
 	else
-		chmod 600 "${tmp}"
 		mv "${tmp}" "${hooks}"
 		printf 'Cursor: configured routing hook in %s\n' "${requested}"
 	fi
@@ -720,19 +827,32 @@ uninstall_collect_agents() {
 			*,antigravity,*) continue ;;
 			esac
 		fi
-		path=$(agent_instructions "${id}")
-		[ -f "${path}" ] || [ -L "${path}" ] || continue
-		state=$(block_state "${path}") || state=invalid
-		if [ "${state}" != absent ]; then
-			uninstall_agents="${uninstall_agents} ${id}"
-		fi
+		while IFS= read -r path; do
+			[ -f "${path}" ] || [ -L "${path}" ] || continue
+			state=$(block_state "${path}") || state=invalid
+			if [ "${state}" != absent ]; then
+				uninstall_agents="${uninstall_agents} ${id}"
+				break
+			fi
+		done < <(agent_all_instructions "${id}")
 	done
 }
 
+agent_all_instructions() {
+	agent_instructions "$1"
+	agent_stale_instructions "$1"
+}
+
 uninstall_preflight_instruction() {
-	local id="$1" label requested target state header digest
+	local id="$1" label requested
 	label=$(agent_label "${id}")
-	requested=$(agent_instructions "${id}")
+	while IFS= read -r requested; do
+		uninstall_preflight_file "${label}" "${requested}"
+	done < <(agent_all_instructions "${id}")
+}
+
+uninstall_preflight_file() {
+	local label="$1" requested="$2" target state
 	[ -f "${requested}" ] || [ -L "${requested}" ] || return 0
 	target=$(resolve_target "${requested}") || {
 		preflight_blocked "${label}" "${requested}" other "unresolvable symlink"
@@ -744,14 +864,9 @@ uninstall_preflight_instruction() {
 	absent) ;;
 	invalid) preflight_blocked "${label}" "${requested}" markers "" ;;
 	present)
-		header=$(block_first_line "${target}")
-		if block_has_header "${header}"; then
-			digest="${header#* sha256:}"
-			digest="${digest%% -->*}"
-			if [ "${digest}" != "$(block_body_hash "${target}")" ] && [ "${force}" -eq 0 ]; then
-				preflight_blocked "${label}" "${requested}" edits ""
-				return 0
-			fi
+		if [ "${force}" -eq 0 ] && block_has_local_edits "${target}"; then
+			preflight_blocked "${label}" "${requested}" edits ""
+			return 0
 		fi
 		preflight_report "${label}" "would remove" "${requested}"
 		;;
@@ -817,13 +932,14 @@ uninstall_preflight_cursor() {
 uninstall_remove_instruction() {
 	local id="$1" label requested target state
 	label=$(agent_label "${id}")
-	requested=$(agent_instructions "${id}")
-	[ -e "${requested}" ] || [ -L "${requested}" ] || return 0
-	target=$(resolve_target "${requested}") || return 1
-	[ -f "${target}" ] || return 0
-	state=$(block_state "${target}") || state=invalid
-	[ "${state}" = present ] || return 0
-	remove_block "${requested}" "${label}"
+	while IFS= read -r requested; do
+		[ -e "${requested}" ] || [ -L "${requested}" ] || continue
+		target=$(resolve_target "${requested}") || return 1
+		[ -f "${target}" ] || continue
+		state=$(block_state "${target}") || state=invalid
+		[ "${state}" = present ] || continue
+		remove_block "${requested}" "${label}" || return 1
+	done < <(agent_all_instructions "${id}")
 }
 
 uninstall_remove_cursor() {
@@ -892,7 +1008,7 @@ uninstall_state_files() {
 	state="${config}/binaries"
 	if [ -f "${state}" ]; then
 		keep=0
-		for bin in jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine; do
+		for bin in jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint shellcheck difft yq mdq hyperfine osv-scanner; do
 			if [ -e "${uninstall_bin_dir}/${bin}" ]; then
 				keep=1
 				break
@@ -938,7 +1054,7 @@ uninstall_tools_hint() {
 	if [ "${mode}" = brew ]; then
 		for tool in rtk:rtk rg:ripgrep ast-grep:ast-grep sd:sd uv:uv jq:jq yq:yq mdq:mdq \
 			gh:gh wt:worktrunk difft:difftastic gitleaks:gitleaks actionlint:actionlint \
-			shellcheck:shellcheck hyperfine:hyperfine; do
+			shellcheck:shellcheck hyperfine:hyperfine osv-scanner:osv-scanner gtimeout:coreutils gopls:gopls; do
 			bin="${tool%%:*}"
 			formula="${tool#*:}"
 			command -v "${bin}" >/dev/null 2>&1 || continue
@@ -950,7 +1066,7 @@ uninstall_tools_hint() {
 		fi
 	else
 		for bin in rtk rg ast-grep sd uv uvx jq yq mdq gh wt git-wt difft gitleaks \
-			actionlint shellcheck hyperfine gopls; do
+			actionlint shellcheck hyperfine osv-scanner gopls; do
 			[ ! -e "${uninstall_bin_dir}/${bin}" ] ||
 				paths="${paths}${paths:+ }${uninstall_bin_dir}/${bin}"
 		done
@@ -959,14 +1075,24 @@ uninstall_tools_hint() {
 			printf '  rm %s\n' "${paths}"
 		fi
 	fi
-	bundle="${XDG_DATA_HOME:-${HOME}/.local/share}/agent-ready/codegraph"
-	if [ -e "${bundle}" ] || [ -L "${uninstall_bin_dir}/codegraph" ]; then
-		printf '  codegraph bundle: rm -rf %s %s\n' "${bundle}" "${uninstall_bin_dir}/codegraph"
-	fi
+	# Only a link into the bundle is ours; any other codegraph is the user's.
+	bundle="${AGENT_READY_CODEGRAPH_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/agent-ready/codegraph}"
+	case "$(readlink "${uninstall_bin_dir}/codegraph" 2>/dev/null || true)" in
+	"${bundle}"/*) printf '  codegraph bundle: rm -rf %s %s\n' "${bundle}" "${uninstall_bin_dir}/codegraph" ;;
+	*)
+		[ ! -e "${bundle}" ] || printf '  codegraph bundle: rm -rf %s\n' "${bundle}"
+		;;
+	esac
+	case "$(readlink "${uninstall_bin_dir}/timeout" 2>/dev/null || true)" in
+	*/gtimeout) printf '  timeout link: rm %s\n' "${uninstall_bin_dir}/timeout" ;;
+	esac
 	printf '  RTK integration: rtk init -g --uninstall\n'
-	# The plain command does not reach these two RTK integrations.
+	# The plain command reaches only Claude Code, OpenCode, and Cursor.
 	for id in ${uninstall_agents}; do
 		case "${id}" in
+		codex | gemini | copilot)
+			printf '  RTK integration for %s: rtk init -g --%s --uninstall\n' "$(agent_label "${id}")" "${id}"
+			;;
 		antigravity | pi)
 			printf '  RTK integration for %s: rtk init -g --agent %s --uninstall\n' "$(agent_label "${id}")" "${id}"
 			;;
@@ -1164,6 +1290,7 @@ if agent_selected codex; then
 	found=1
 	configure_rtk "$(agent_label codex)" -g --codex --no-trust-filters
 	install_block "$(agent_instructions codex)" "$(agent_label codex)" "$(agent_block codex)"
+	retire_stale codex
 fi
 if agent_selected cursor; then
 	found=1
@@ -1190,6 +1317,7 @@ fi
 if agent_selected windsurf; then
 	found=1
 	install_block "$(agent_instructions windsurf)" "$(agent_label windsurf)" "$(agent_block windsurf)"
+	retire_stale windsurf
 fi
 if agent_selected grok; then
 	found=1
@@ -1208,6 +1336,7 @@ fi
 if agent_selected cline; then
 	found=1
 	install_block "$(agent_instructions cline)" "$(agent_label cline)" "$(agent_block cline)"
+	retire_stale cline
 fi
 if agent_selected kilo; then
 	found=1
@@ -1229,6 +1358,7 @@ if agent_selected pi; then
 	found=1
 	configure_rtk_optional "$(agent_label pi)" pi
 	install_block "$(agent_instructions pi)" "$(agent_label pi)" "$(agent_block pi)"
+	retire_stale pi
 fi
 
 # Run last: a malformed instructions file must stop the installer before a
