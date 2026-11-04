@@ -73,6 +73,8 @@ if [ -e "${launcher}" ] || [ -L "${launcher}" ]; then
 	fi
 fi
 
+# The user's own PATH decides the warning at the end; this one only finds tools.
+user_path="${PATH}"
 PATH="${bin_dir}:${PATH}"
 for command in curl tar gzip jq; do
 	command -v "${command}" >/dev/null 2>&1 ||
@@ -168,7 +170,7 @@ mv "${tmp}" "${state}"
 
 printf 'codegraph %s installed\n' "${tag}"
 
-case ":${PATH}:" in
+case ":${user_path}:" in
 *":${bin_dir}:"*) ;;
 *) # shellcheck disable=SC2016 # $PATH is printed literally for the profile
 	printf '\n%s is not on PATH. Add this to your shell profile:\n  export PATH="%s:$PATH"\n' "${bin_dir}" "${bin_dir}" ;;

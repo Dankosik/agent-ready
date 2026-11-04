@@ -126,15 +126,22 @@ command -v gopls >/dev/null 2>&1 || {
 	printf 'gopls is not installed; run %s first\n' "$0" >&2
 	exit 3
 }
-gopls mcp -instructions >/dev/null 2>&1 || {
-	printf 'gopls v0.20 or newer is required for MCP\n' >&2
+# The output, not the status: a wrapper can succeed and print nothing.
+[ -n "$(gopls mcp -instructions 2>/dev/null || true)" ] || {
+	printf 'gopls mcp -instructions printed nothing; gopls v0.20 or newer is required for MCP\n' >&2
 	exit 3
+}
+
+# The same signs of Cursor as the base installer: the app often has no CLI on PATH.
+detect_cursor() {
+	command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1 ||
+		[ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]
 }
 
 found=0
 cursor_config=
 
-if [ "${agent}" = cursor ] || { auto_selected cursor && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1; }; }; then
+if [ "${agent}" = cursor ] || { auto_selected cursor && detect_cursor; }; then
 	cursor_config=$(resolve_target "${HOME}/.cursor/mcp.json")
 	command -v jq >/dev/null 2>&1 || {
 		printf 'Cursor: jq is required to merge mcp.json\n' >&2

@@ -51,6 +51,10 @@ jobs:
         run: |
           ./test-install.sh
           ./verify.sh
+      - name: Verify Go support
+        run: |
+          ./languages/go/install.sh --configure-only
+          ./languages/go/verify.sh
 
   binaries:
     strategy:

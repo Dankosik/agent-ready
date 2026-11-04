@@ -5,6 +5,8 @@ set -euo pipefail
 # These point the installer at agent configuration; a developer's own values must
 # not route a test at real files.
 unset CLAUDE_CONFIG_DIR CODEX_HOME COPILOT_HOME GROK_HOME QWEN_HOME DSH_HOME PI_CODING_AGENT_DIR CLINE_DIR CLINE_DATA_DIR
+unset GEMINI_CLI_HOME OPENCODE_CONFIG_DIR KILO_CONFIG_DIR KILO_DISABLE_CLAUDE_CODE KILO_DISABLE_CLAUDE_CODE_PROMPT
+unset CRUSH_GLOBAL_CONFIG GOOSE_PATH_ROOT
 unset XDG_CONFIG_HOME XDG_DATA_HOME GITHUB_TOKEN GH_TOKEN
 unset AGENT_READY_BIN_DIR AGENT_READY_CODEGRAPH_DIR AGENT_READY_OS AGENT_READY_ARCH AGENT_READY_REF
 unset AGENT_READY_GITHUB_API AGENT_READY_ARCHIVE_URL AGENT_READY_MIN_RELEASE_AGE
@@ -38,17 +40,19 @@ EOF
 chmod +x "${fake_bin}/rtk"
 cat >"${fake_bin}/gopls" <<'EOF'
 #!/bin/sh
-exit 0
+printf 'gopls fixture\n'
 EOF
 chmod +x "${fake_bin}/gopls"
 cat >"${fake_bin}/codegraph" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"${HOME}/codegraph-calls"
+[ "$1" != install ] || printf '%s\n' "${CODEGRAPH_TELEMETRY:-unset}" >>"${HOME}/codegraph-install-telemetry"
 EOF
 chmod +x "${fake_bin}/codegraph"
 cat >"${fake_bin}/brew" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"${HOME}/brew-calls"
+[ "$1" != list ] || printf 'rtk\nripgrep\n'
 EOF
 chmod +x "${fake_bin}/brew"
 
@@ -286,6 +290,8 @@ jq -e '.additional_context | contains("Tool routing (use instead of defaults):")
 	"${fake_home}/.cursor/hooks/agent-ready-session-start.json" >/dev/null
 rg -qF 'install --yes --target=auto --location=global --no-permissions' "${fake_home}/codegraph-calls"
 rg -qx 'telemetry off' "${fake_home}/codegraph-calls"
+# CodeGraph's installer reports its own run, so it must already be off for that run.
+[ "$(sort -u "${fake_home}/codegraph-install-telemetry")" = 0 ]
 
 mkdir -p "${fake_home}/.config/agent-ready/languages"
 printf 'enabled\n' >"${fake_home}/.config/agent-ready/languages/go"
@@ -466,6 +472,8 @@ HOME="${language_home}" PATH="${test_path}" \
 	COPILOT_HOME="${language_home}/.copilot" \
 	"${root}/bootstrap.sh" language go --configure-only >/dev/null
 [ -f "${language_home}/.config/agent-ready/languages/go" ]
+# Claude Code ran first here, so Kilo loads its CLAUDE.md rather than a new file.
+[ ! -e "${language_home}/.config/kilo/AGENTS.md" ]
 for target in \
 	"${language_home}/.claude/CLAUDE.md" \
 	"${language_home}/.codex/AGENTS.md" \
@@ -476,7 +484,6 @@ for target in \
 	"${language_home}/.config/opencode/AGENTS.md" \
 	"${language_home}/.qwen/QWEN.md" \
 	"${language_home}/.cline/rules/agent-ready.md" \
-	"${language_home}/.config/kilo/AGENTS.md" \
 	"${language_home}/.config/crush/CRUSH.md" \
 	"${language_home}/.config/goose/AGENTS.md"; do
 	rg -qF 'use gopls where compiler semantics matter' "${target}"
@@ -2533,5 +2540,239 @@ if rg -qF "${hint_home}/.local/bin/uv" "${work}/owned-hint.out"; then
 	exit 1
 fi
 rg -qF 'claude mcp remove --scope user gopls' "${work}/owned-hint.out"
+
+# Fixtures for the checks below: only what each one names is on PATH, so detection
+# and the agent's own files cannot leak in from the machine or the shared fixtures.
+fix_bin() {
+	local dir="$1" command
+	shift
+	mkdir -p "${dir}"
+	for command in rtk codegraph gopls; do
+		cp "${fake_bin}/${command}" "${dir}/${command}"
+	done
+	ln -sf "$(command -v jq)" "${dir}/jq"
+	for command in "$@"; do
+		printf '#!/bin/sh\nexit 0\n' >"${dir}/${command}"
+		chmod +x "${dir}/${command}"
+	done
+}
+fix_run() {
+	local home="$1" bin="$2"
+	shift 2
+	mkdir -p "${home}"
+	HOME="${home}" PATH="${bin}:/usr/bin:/bin" "$@"
+}
+block_count() { rg -c '^<!-- agent-ready:start -->$' "$1" || printf '0\n'; }
+lacks() {
+	if rg "$@"; then
+		printf 'unexpected match: %s\n' "$*" >&2
+		exit 1
+	fi
+}
+
+fixes_bin="${work}/fixes-bin"
+fix_bin "${fixes_bin}"
+
+# regression: Kilo loads the first of its AGENTS.md and ~/.claude/CLAUDE.md that
+# exists, so a new AGENTS.md must not hide a CLAUDE.md it already reads.
+kilo_home="${work}/kilo-home"
+mkdir -p "${kilo_home}/.claude"
+printf 'my claude notes\n' >"${kilo_home}/.claude/CLAUDE.md"
+fix_run "${kilo_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >/dev/null
+[ ! -e "${kilo_home}/.config/kilo/AGENTS.md" ]
+rg -qx 'my claude notes' "${kilo_home}/.claude/CLAUDE.md"
+[ "$(block_count "${kilo_home}/.claude/CLAUDE.md")" -eq 1 ]
+fix_run "${kilo_home}" "${fixes_bin}" "${root}/install.sh" --uninstall >/dev/null
+[ "$(block_count "${kilo_home}/.claude/CLAUDE.md")" -eq 0 ]
+rg -qx 'my claude notes' "${kilo_home}/.claude/CLAUDE.md"
+
+# A Claude Code selected in the same run is about to create that file, and the
+# plan a dry run prints has to be what the run does.
+kilo_both_home="${work}/kilo-both-home"
+fix_run "${kilo_both_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent claude,kilo --dry-run >"${work}/kilo-both.out"
+[ "$(rg -cF "${kilo_both_home}/.claude/CLAUDE.md" "${work}/kilo-both.out")" -eq 2 ]
+fix_run "${kilo_both_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent claude,kilo >/dev/null
+[ ! -e "${kilo_both_home}/.config/kilo/AGENTS.md" ]
+[ "$(block_count "${kilo_both_home}/.claude/CLAUDE.md")" -eq 1 ]
+
+# Kilo's own file wins when it exists, and with CLAUDE.md switched off a new one
+# hides nothing.
+kilo_own_home="${work}/kilo-own-home"
+mkdir -p "${kilo_own_home}/.claude" "${kilo_own_home}/.config/kilo"
+printf 'my claude notes\n' >"${kilo_own_home}/.claude/CLAUDE.md"
+printf 'my kilo notes\n' >"${kilo_own_home}/.config/kilo/AGENTS.md"
+fix_run "${kilo_own_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >"${work}/kilo-own.out"
+[ "$(block_count "${kilo_own_home}/.config/kilo/AGENTS.md")" -eq 1 ]
+[ "$(block_count "${kilo_own_home}/.claude/CLAUDE.md")" -eq 0 ]
+lacks -qF 'hides' "${work}/kilo-own.out"
+kilo_off_home="${work}/kilo-off-home"
+mkdir -p "${kilo_off_home}/.claude"
+printf 'my claude notes\n' >"${kilo_off_home}/.claude/CLAUDE.md"
+KILO_DISABLE_CLAUDE_CODE=1 fix_run "${kilo_off_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >/dev/null
+[ "$(block_count "${kilo_off_home}/.config/kilo/AGENTS.md")" -eq 1 ]
+[ "$(block_count "${kilo_off_home}/.claude/CLAUDE.md")" -eq 0 ]
+
+# An earlier release left a block-only file that hides CLAUDE.md, and an empty one
+# hides it just the same. Deleting it stays the user's call.
+kilo_legacy_home="${work}/kilo-legacy-home"
+fix_run "${kilo_legacy_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >/dev/null
+[ "$(block_count "${kilo_legacy_home}/.config/kilo/AGENTS.md")" -eq 1 ]
+mkdir -p "${kilo_legacy_home}/.claude"
+printf 'my claude notes\n' >"${kilo_legacy_home}/.claude/CLAUDE.md"
+fix_run "${kilo_legacy_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >"${work}/kilo-legacy.out"
+rg -qF 'holds nothing of yours but hides' "${work}/kilo-legacy.out"
+fix_run "${kilo_legacy_home}" "${fixes_bin}" "${root}/install.sh" --uninstall >"${work}/kilo-legacy-un.out"
+rg -qF 'holds nothing of yours but hides' "${work}/kilo-legacy-un.out"
+
+# regression: an agent's own variable moves the file it reads, so the block follows
+# it. CodeGraph knows only the default Gemini and OpenCode paths, so a moved file
+# never gets its section and keeps the Code graph line.
+agent_moved_home="${work}/agent-moved-home"
+moved_run() {
+	GEMINI_CLI_HOME="${agent_moved_home}/gemini" OPENCODE_CONFIG_DIR="${agent_moved_home}/opencode" \
+		KILO_CONFIG_DIR="${agent_moved_home}/kilo" CRUSH_GLOBAL_CONFIG="${agent_moved_home}/crush" \
+		GOOSE_PATH_ROOT="${agent_moved_home}/goose" fix_run "${agent_moved_home}" "${fixes_bin}" "${root}/install.sh" "$@"
+}
+moved_run --configure-only --agent gemini,opencode,kilo,crush,goose >/dev/null
+for target in gemini/.gemini/GEMINI.md opencode/AGENTS.md kilo/AGENTS.md crush/CRUSH.md goose/config/AGENTS.md; do
+	[ "$(block_count "${agent_moved_home}/${target}")" -eq 1 ]
+done
+for target in .gemini/GEMINI.md .config/opencode/AGENTS.md .config/kilo/AGENTS.md .config/crush/CRUSH.md .config/goose/AGENTS.md; do
+	[ ! -e "${agent_moved_home}/${target}" ]
+done
+rg -q '^- Code graph:' "${agent_moved_home}/gemini/.gemini/GEMINI.md"
+rg -q '^- Code graph:' "${agent_moved_home}/opencode/AGENTS.md"
+moved_run --uninstall >/dev/null
+for target in gemini/.gemini/GEMINI.md opencode/AGENTS.md kilo/AGENTS.md crush/CRUSH.md goose/config/AGENTS.md; do
+	[ "$(block_count "${agent_moved_home}/${target}")" -eq 0 ]
+done
+
+# A block from before the variable was set is still found by uninstall.
+moved_old_home="${work}/agent-moved-old-home"
+fix_run "${moved_old_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent crush,antigravity >/dev/null
+CRUSH_GLOBAL_CONFIG="${moved_old_home}/crush" GEMINI_CLI_HOME="${moved_old_home}/gemini" \
+	fix_run "${moved_old_home}" "${fixes_bin}" "${root}/install.sh" --uninstall >/dev/null
+[ "$(block_count "${moved_old_home}/.config/crush/CRUSH.md")" -eq 0 ]
+[ "$(block_count "${moved_old_home}/.gemini/GEMINI.md")" -eq 0 ]
+
+# regression: an agent added with --agent on top of an automatic install is
+# repeated by the next automatic run while its block exists, and only then.
+auto_keep_home="${work}/auto-keep-home"
+auto_keep_bin="${work}/auto-keep-bin"
+fix_bin "${auto_keep_bin}" claude
+fix_run "${auto_keep_home}" "${auto_keep_bin}" "${root}/install.sh" --configure-only >/dev/null
+fix_run "${auto_keep_home}" "${auto_keep_bin}" "${root}/install.sh" --configure-only --agent qwen >/dev/null
+rg -qx 'agents=auto' "${auto_keep_home}/.config/agent-ready/receipt"
+fix_run "${auto_keep_home}" "${auto_keep_bin}" "${root}/install.sh" --configure-only --dry-run >"${work}/auto-keep.out"
+rg -qF 'Qwen Code: unchanged' "${work}/auto-keep.out"
+fix_run "${auto_keep_home}" "${auto_keep_bin}" "${root}/install.sh" --configure-only >/dev/null
+rg -q '^configured=.*qwen' "${auto_keep_home}/.config/agent-ready/receipt"
+sed '/agent-ready:start/,/agent-ready:end/d' "${auto_keep_home}/.qwen/QWEN.md" >"${work}/qwen-stripped"
+cp "${work}/qwen-stripped" "${auto_keep_home}/.qwen/QWEN.md"
+fix_run "${auto_keep_home}" "${auto_keep_bin}" "${root}/install.sh" --configure-only >/dev/null
+lacks -q '^configured=.*qwen' "${auto_keep_home}/.config/agent-ready/receipt"
+[ "$(block_count "${auto_keep_home}/.qwen/QWEN.md")" -eq 0 ]
+
+# regression: agents sharing one file through a symlink settle on one block, so a
+# repeat run changes nothing, whichever order they are named or configured in.
+shared_home="${work}/agent-shared-home"
+mkdir -p "${shared_home}/.claude" "${shared_home}/.copilot"
+printf 'shared notes\n' >"${shared_home}/.claude/CLAUDE.md"
+ln -s ../.claude/CLAUDE.md "${shared_home}/.copilot/copilot-instructions.md"
+fix_run "${shared_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent copilot,claude >/dev/null
+digest_shared=$(digest_of "${shared_home}/.claude/CLAUDE.md")
+fix_run "${shared_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent copilot,claude --dry-run >"${work}/shared.out"
+lacks -qF 'would refresh' "${work}/shared.out"
+fix_run "${shared_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent copilot,claude >"${work}/shared-run.out"
+lacks -qF 'refreshed' "${work}/shared-run.out"
+fix_run "${shared_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent copilot >/dev/null
+[ "$(digest_of "${shared_home}/.claude/CLAUDE.md")" = "${digest_shared}" ]
+[ -L "${shared_home}/.copilot/copilot-instructions.md" ]
+[ "$(block_count "${shared_home}/.claude/CLAUDE.md")" -eq 1 ]
+
+# regression: a Cursor hook directory that cannot be written stops the run before
+# any write, and one needing no change is not a problem.
+if [ "$(id -u)" -ne 0 ]; then
+	hooks_ro_home="${work}/hooks-ro-home"
+	mkdir -p "${hooks_ro_home}/.cursor/hooks"
+	chmod 555 "${hooks_ro_home}/.cursor/hooks"
+	hooks_ro_status=0
+	fix_run "${hooks_ro_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent claude,cursor --dry-run \
+		>"${work}/hooks-ro.out" 2>&1 || hooks_ro_status=$?
+	[ "${hooks_ro_status}" -ne 0 ]
+	rg -qF 'agent-ready-session-start.json' "${work}/hooks-ro.out"
+	hooks_ro_status=0
+	fix_run "${hooks_ro_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent claude,cursor \
+		>/dev/null 2>&1 || hooks_ro_status=$?
+	[ "${hooks_ro_status}" -ne 0 ]
+	[ ! -e "${hooks_ro_home}/.claude/CLAUDE.md" ]
+	chmod 755 "${hooks_ro_home}/.cursor/hooks"
+	fix_run "${hooks_ro_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent claude,cursor >/dev/null
+	chmod 555 "${hooks_ro_home}/.cursor/hooks" "${hooks_ro_home}/.cursor"
+	fix_run "${hooks_ro_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent claude,cursor >/dev/null
+	chmod 755 "${hooks_ro_home}/.cursor/hooks" "${hooks_ro_home}/.cursor"
+fi
+
+# regression: `language go` sees Cursor the way the base installer does, and an
+# installed gopls that prints no MCP instructions is not ready.
+go_app_home="${work}/go-app-home"
+mkdir -p "${go_app_home}/Applications/Cursor.app"
+fix_run "${go_app_home}" "${fixes_bin}" "${root}/languages/go/install.sh" --configure-only >/dev/null
+jq -e '.mcpServers.gopls' "${go_app_home}/.cursor/mcp.json" >/dev/null
+go_silent_bin="${work}/go-silent-bin"
+fix_bin "${go_silent_bin}" claude
+printf '#!/bin/sh\nexit 0\n' >"${go_silent_bin}/gopls"
+go_silent_status=0
+fix_run "${work}/go-silent-home" "${go_silent_bin}" "${root}/languages/go/install.sh" --configure-only --agent claude \
+	>"${work}/go-silent.out" 2>&1 || go_silent_status=$?
+[ "${go_silent_status}" -eq 3 ]
+rg -qF 'printed nothing' "${work}/go-silent.out"
+
+# regression: the PATH warning looks at the user's PATH, not the one this script
+# extended to find its own tools.
+path_warn_home="${work}/path-warn-home"
+path_warn_api="${work}/path-warn-api"
+mkdir -p "${work}/path-warn-pkg/codegraph/bin" "${path_warn_api}/repos/colbymchenry/codegraph/releases"
+printf '#!/bin/sh\nexit 0\n' >"${work}/path-warn-pkg/codegraph/bin/codegraph"
+chmod +x "${work}/path-warn-pkg/codegraph/bin/codegraph"
+tar -czf "${work}/path-warn.tar.gz" -C "${work}/path-warn-pkg" codegraph
+cat >"${path_warn_api}/repos/colbymchenry/codegraph/releases/latest" <<EOF
+{"tag_name":"v9.9.9","assets":[{"name":"codegraph-linux-x64.tar.gz","browser_download_url":"file://${work}/path-warn.tar.gz","digest":"sha256:$(digest_of "${work}/path-warn.tar.gz")"}]}
+EOF
+AGENT_READY_OS=Linux AGENT_READY_ARCH=x86_64 AGENT_READY_GITHUB_API="file://${path_warn_api}" \
+	fix_run "${path_warn_home}" "${fixes_bin}" "${root}/install-codegraph.sh" >"${work}/path-warn.out"
+rg -qF "${path_warn_home}/.local/bin is not on PATH" "${work}/path-warn.out"
+
+# regression: unrelated tools named goose and dsh are not agents, and the agents
+# with those names still are.
+detect_bin="${work}/detect-bin"
+fix_bin "${detect_bin}"
+printf '#!/bin/sh\necho "goose version: v3.24.1"\n' >"${detect_bin}/goose"
+printf '#!/bin/sh\necho "Distributed Shell / Remote Shell Program version 0.25.10"\n' >"${detect_bin}/dsh"
+chmod +x "${detect_bin}/goose" "${detect_bin}/dsh"
+fix_run "${work}/agent-detect-home" "${detect_bin}" "${root}/install.sh" --configure-only --dry-run >"${work}/detect.out"
+lacks -qF 'goose:' "${work}/detect.out"
+lacks -qF 'DeepSeek Harness:' "${work}/detect.out"
+printf '#!/bin/sh\necho "1.25.0"\n' >"${detect_bin}/goose"
+printf '#!/bin/sh\necho "dsh 0.4.0"\n' >"${detect_bin}/dsh"
+fix_run "${work}/agent-detect-home" "${detect_bin}" "${root}/install.sh" --configure-only --dry-run >"${work}/detect.out"
+rg -qF 'goose: would add' "${work}/detect.out"
+rg -qF 'DeepSeek Harness: would add' "${work}/detect.out"
+
+# regression: the removal commands name what Homebrew really has and the agents
+# really wired, so they can be pasted as printed.
+hint_brew_home="${work}/hint-brew-home"
+fix_bin "${work}/hint-brew-bin"
+cp "${fake_bin}/brew" "${work}/hint-brew-bin/brew"
+printf '#!/bin/sh\nexit 0\n' >"${work}/hint-brew-bin/sd"
+chmod +x "${work}/hint-brew-bin/sd"
+mkdir -p "${hint_brew_home}/.config/agent-ready"
+fix_run "${hint_brew_home}" "${work}/hint-brew-bin" "${root}/install.sh" --configure-only --agent claude,copilot,qwen >/dev/null
+sed 's/^tools=.*/tools=brew/' "${hint_brew_home}/.config/agent-ready/receipt" >"${work}/hint-brew-receipt"
+cp "${work}/hint-brew-receipt" "${hint_brew_home}/.config/agent-ready/receipt"
+fix_run "${hint_brew_home}" "${work}/hint-brew-bin" "${root}/install.sh" --uninstall >"${work}/hint-brew.out"
+rg -qxF '  brew uninstall rtk ripgrep' "${work}/hint-brew.out"
+rg -qF -- '--keep-cli --target claude,copilot-cli' "${work}/hint-brew.out"
+lacks -qF '<agents>' "${work}/hint-brew.out"
 
 printf 'installer routing checks passed\n'
