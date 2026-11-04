@@ -73,7 +73,7 @@ sudo apt-get install -y curl ca-certificates xz-utils unzip
 Then run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstrap.sh | AGENT_READY_REF=v1.5.0 bash
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash
 ```
 
 That's it. The installer adds the tools and configures every
@@ -82,7 +82,7 @@ session after the command finishes.
 
 What happens during that command:
 
-1. `bootstrap.sh` downloads the `v1.5.0` release archive and checks it against
+1. `bootstrap.sh` downloads the `v1.5.1` release archive and checks it against
    the SHA-256 digest GitHub records before anything inside it runs.
 2. The installer detects which agents are on this machine.
 3. It installs missing tools (with Homebrew on macOS, from verified GitHub
@@ -96,7 +96,7 @@ On macOS it also installs GNU coreutils, because agents call `timeout` by reflex
 and macOS has none. If no `timeout` is on your `PATH`, the installer links
 `~/.local/bin/timeout` to `gtimeout`; it never replaces a file already there.
 
-The command is pinned to the immutable `v1.5.0` release. Upgrade with
+The command is pinned to the immutable `v1.5.1` release. Upgrade with
 [`agent-ready update`](#update), or by choosing a newer release version in both
 places in the command.
 
@@ -112,7 +112,7 @@ filesystem, such as `~/projects`, rather than under `/mnt/c`.
 
 ## What gets added to AGENTS.md
 
-This is the exact block a `v1.5.0` install writes into an agent's global
+This is the exact block a `v1.5.1` install writes into an agent's global
 instruction file, here `~/.config/goose/AGENTS.md`. Codex gets the same block in
 `~/.codex/AGENTS.md`, Claude Code in `~/.claude/CLAUDE.md`, and so on (see
 [Supported agents](#supported-agents)). Nothing above or below the markers is
@@ -120,7 +120,7 @@ touched.
 
 ```markdown
 <!-- agent-ready:start -->
-<!-- agent-ready v1.5.0 sha256:9a75b89a66e657a538aadf5ab76459ab171e17201a53c5b78c176ca160b4189b -->
+<!-- agent-ready v1.5.1 sha256:9a75b89a66e657a538aadf5ab76459ab171e17201a53c5b78c176ca160b4189b -->
 Tool routing (use instead of defaults):
 - Shell: prefix commands with `rtk`; `rtk bypass <cmd>` for unfiltered output.
 - Builds/tests: don't pipe them into `tail`/`head`; the pipe exits 0 and cuts the failure. rtk already condenses cargo/go/pytest/vitest/tsc output; if you must trim, `set -o pipefail` first.
@@ -172,7 +172,7 @@ and Windsurf, app bundle) it finds. To configure only one, pass its
 selector:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstrap.sh | AGENT_READY_REF=v1.5.0 bash -s -- codex
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash -s -- codex
 ```
 
 | Agent | Selector | Where the routing goes |
@@ -305,7 +305,7 @@ configures the desktop app; the `agy` CLI uses the CLI routing.
 Run this after the quick start command if you work with Go:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstrap.sh | AGENT_READY_REF=v1.5.0 bash -s -- language go
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash -s -- language go
 ```
 
 It installs `gopls`, connects `gopls mcp` to detected Codex, Claude Code, and
@@ -318,13 +318,13 @@ detecting more.
 
 ```bash
 # Codex
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstrap.sh | AGENT_READY_REF=v1.5.0 bash -s -- language go --agent codex
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash -s -- language go --agent codex
 
 # Claude Code
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstrap.sh | AGENT_READY_REF=v1.5.0 bash -s -- language go --agent claude
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash -s -- language go --agent claude
 
 # Cursor
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstrap.sh | AGENT_READY_REF=v1.5.0 bash -s -- language go --agent cursor
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash -s -- language go --agent cursor
 ```
 
 </details>
@@ -357,13 +357,13 @@ release, and CodeGraph is upgraded only when Agent Ready installed it. Use
 `--configure-only` to skip tool installation entirely:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstrap.sh | AGENT_READY_REF=v1.5.0 bash -s -- codex --configure-only
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash -s -- codex --configure-only
 ```
 
 To explicitly upgrade the generic tools:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstrap.sh | AGENT_READY_REF=v1.5.0 bash -s -- --upgrade
+curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash -s -- --upgrade
 ```
 
 ## Update

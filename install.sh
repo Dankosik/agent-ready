@@ -193,7 +193,7 @@ agent_stale_candidates() {
 	windsurf)
 		printf '%s\n' "${HOME}/.devin/global_rules.md" "${HOME}/.codeium/windsurf/memories/global_rules.md"
 		;;
-	# Before v1.5.0 the block went where Cline CLI never loaded it.
+	# Before v1.5.1 the block went where Cline CLI never loaded it.
 	cline) printf '%s\n' "${CLINE_DATA_DIR:-${HOME}/.cline/data}/settings/rules/agent-ready.md" ;;
 	pi)
 		dir="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}"
