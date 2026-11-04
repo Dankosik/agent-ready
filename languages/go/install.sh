@@ -120,13 +120,15 @@ elif [ "${install_tools}" -eq 1 ]; then
 	fi
 fi
 
+# Exit 3: a prerequisite this run may not install is missing, which an update
+# reports and skips (see apply_languages in agent-ready).
 command -v gopls >/dev/null 2>&1 || {
 	printf 'gopls is not installed; run %s first\n' "$0" >&2
-	exit 1
+	exit 3
 }
 gopls mcp -instructions >/dev/null 2>&1 || {
 	printf 'gopls v0.20 or newer is required for MCP\n' >&2
-	exit 1
+	exit 3
 }
 
 found=0
@@ -146,7 +148,7 @@ fi
 
 if [ "${agent}" = codex ] && ! command -v codex >/dev/null 2>&1; then
 	printf 'codex is required for --agent codex\n' >&2
-	exit 1
+	exit 3
 fi
 if [ "${agent}" = codex ] || { auto_selected codex && command -v codex >/dev/null 2>&1; }; then
 	found=1
@@ -160,7 +162,7 @@ fi
 
 if [ "${agent}" = claude ] && ! command -v claude >/dev/null 2>&1; then
 	printf 'claude is required for --agent claude\n' >&2
-	exit 1
+	exit 3
 fi
 if [ "${agent}" = claude ] || { auto_selected claude && command -v claude >/dev/null 2>&1; }; then
 	found=1

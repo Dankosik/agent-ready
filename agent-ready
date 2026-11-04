@@ -302,13 +302,20 @@ narrowing_needed() {
 }
 
 receipt_backup=
+backup_receipt() {
+	local file
+	file=$(receipt_path)
+	[ -z "${receipt_backup}" ] && [ -f "${file}" ] || return 0
+	receipt_backup=$(mktemp "${file}.XXXXXX")
+	cp -p "${file}" "${receipt_backup}"
+}
+
 narrow_receipt() {
 	local file
 	narrow_for_release "$1"
 	narrowing_needed || return 0
 	file=$(receipt_path)
-	receipt_backup=$(mktemp "${file}.XXXXXX")
-	cp -p "${file}" "${receipt_backup}"
+	backup_receipt
 	printf 'agent-ready %s does not know every configured agent; their routing blocks stay until a newer release\n' "$1"
 	receipt_write "${file}" "${receipt_version}" "${narrowed_agents}" "${narrowed_configured}" \
 		"${receipt_languages}" "${receipt_tools}"
@@ -529,26 +536,26 @@ apply_update() {
 # Each language installer re-applies the base configuration itself, but its
 # automatic mode re-detects every agent on PATH. An explicit receipt is
 # therefore repeated one agent at a time, so an update never configures an
-# agent the user did not select; a language with no setup for that agent exits
-# 2 and is skipped, while the routing step 4 wrote for it stays.
+# agent the user did not select. A language with no setup for that agent exits
+# 2, and one missing a prerequisite the update may not install (a language
+# server, or an agent since removed) exits 3. Both are skipped, while the routing
+# the base install wrote for them stays.
 apply_languages() {
-	local rest="${receipt_languages}," name agent installer status
+	local rest="${receipt_languages}," name agent agents installer status
 	while [ -n "${rest}" ]; do
 		name="${rest%%,*}"
 		rest="${rest#*,}"
 		[ -n "${name}" ] || continue
 		installer="${root}/languages/${name}/install.sh"
 		[ -f "${installer}" ] || die "unsupported language in the receipt: ${name}"
-		if [ -z "${receipt_agents}" ] || [ "${receipt_agents}" = auto ]; then
-			bash "${installer}" --configure-only
-			continue
-		fi
-		for agent in ${receipt_agents//,/ }; do
+		agents="${receipt_agents:-auto}"
+		for agent in ${agents//,/ }; do
 			status=0
 			bash "${installer}" --configure-only --agent "${agent}" || status=$?
 			case "${status}" in
 			0) ;;
 			2) printf '%s: no %s-specific setup; its routing block still applies\n' "${name}" "${agent}" >&2 ;;
+			3) printf '%s: skipped the %s setup; its routing block still applies\n' "${name}" "${agent}" >&2 ;;
 			*) die "language ${name} failed for ${agent}; the base configuration is updated but the launcher was not moved" ;;
 			esac
 		done
@@ -648,6 +655,10 @@ update() {
 	else
 		printf 'Updating agent-ready %s → %s\n' "${cur}" "${target}"
 	fi
+	# The new installer writes its version into the receipt before the update can
+	# still fail. Restoring the receipt keeps that failure retryable instead of the
+	# next run reporting up to date with the launcher still on the old version.
+	[ "${dry}" -eq 1 ] || backup_receipt
 	args=(apply-update --from "${cur}")
 	[ "${dry}" -eq 0 ] || args+=(--dry-run)
 	[ "${upgrade}" -eq 0 ] || args+=(--upgrade-tools)

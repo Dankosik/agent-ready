@@ -420,9 +420,14 @@ edits stops the run and is named unless you pass `--force`.
 Installed tools are not removed. The command lists what is still installed and
 prints the exact removal commands, including `rtk init -g --uninstall` for the
 RTK integration and `codegraph uninstall` for the CodeGraph MCP wiring; those
-belong to those tools. The `binaries` and `codegraph` state files stay while the
-tools they describe are installed. From a checkout, `./install.sh --uninstall`
-does the same.
+belong to those tools. rtk 1.1.0 deletes the whole `~/.gemini/GEMINI.md` when it
+removes its Gemini integration, so the Gemini command keeps a copy and restores
+it. After Go support, the list also names the `gopls` MCP entries to remove. The
+`binaries` and `codegraph` state files stay while the tools they describe are
+installed. From a checkout, `./install.sh --uninstall` does the same.
+
+Installs, updates, and uninstalls refuse a read-only instruction file before
+writing anything, unless the file needs no change.
 
 ## The `agent-ready` command
 

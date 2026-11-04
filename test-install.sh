@@ -4,7 +4,10 @@ set -euo pipefail
 
 # These point the installer at agent configuration; a developer's own values must
 # not route a test at real files.
-unset DSH_HOME PI_CODING_AGENT_DIR CLINE_DIR CLINE_DATA_DIR
+unset CLAUDE_CONFIG_DIR CODEX_HOME COPILOT_HOME GROK_HOME QWEN_HOME DSH_HOME PI_CODING_AGENT_DIR CLINE_DIR CLINE_DATA_DIR
+unset XDG_CONFIG_HOME XDG_DATA_HOME GITHUB_TOKEN GH_TOKEN
+unset AGENT_READY_BIN_DIR AGENT_READY_CODEGRAPH_DIR AGENT_READY_OS AGENT_READY_ARCH AGENT_READY_REF
+unset AGENT_READY_GITHUB_API AGENT_READY_ARCHIVE_URL AGENT_READY_MIN_RELEASE_AGE
 
 root=$(cd -- "$(dirname -- "$0")" && pwd)
 work=$(mktemp -d)
@@ -2373,5 +2376,162 @@ if rg -qF 'synthetic-value' "${token_home}/curl-stdin"; then
 	printf 'the GitHub token was sent to an API override\n' >&2
 	exit 1
 fi
+
+# regression: the printed Gemini command survives rtk deleting all of GEMINI.md.
+gemini_home="${work}/gemini-hint-home"
+gemini_bin="${work}/gemini-hint-bin"
+mkdir -p "${gemini_home}/.gemini" "${gemini_bin}"
+printf 'user gemini\n' >"${gemini_home}/.gemini/GEMINI.md"
+cat >"${gemini_bin}/rtk" <<'EOF'
+#!/bin/sh
+case "$*" in
+*--gemini*--uninstall*) rm -f "${HOME}/.gemini/GEMINI.md" ;;
+esac
+EOF
+chmod +x "${gemini_bin}/rtk"
+run_gemini_hint() {
+	HOME="${gemini_home}" XDG_CONFIG_HOME="${gemini_home}/.config" PATH="${gemini_bin}:${test_path}" \
+		"${root}/install.sh" "$@"
+}
+run_gemini_hint --configure-only --agent gemini >/dev/null 2>&1
+run_gemini_hint --uninstall >"${work}/gemini-hint.out" 2>&1
+gemini_command=$(sed -n 's/^.*this restores it): //p' "${work}/gemini-hint.out")
+[ -n "${gemini_command}" ]
+HOME="${gemini_home}" PATH="${gemini_bin}:${test_path}" bash -c "${gemini_command}"
+[ "$(cat "${gemini_home}/.gemini/GEMINI.md")" = 'user gemini' ]
+[ ! -e "${gemini_home}/.gemini/GEMINI.md.keep" ]
+
+# regression: a read-only file is refused before any write, never reported as done.
+# Root ignores file modes, and the WSL job runs as root.
+if [ "$(id -u)" -ne 0 ]; then
+	readonly_home="${work}/readonly-home"
+	readonly_file="${readonly_home}/.config/kilo/AGENTS.md"
+	run_readonly() {
+		HOME="${readonly_home}" XDG_CONFIG_HOME="${readonly_home}/.config" PATH="${test_path}" \
+			"${root}/install.sh" "$@"
+	}
+	mkdir -p "$(dirname -- "${readonly_file}")"
+	printf 'user kilo\n' >"${readonly_file}"
+	chmod 444 "${readonly_file}"
+	if run_readonly --configure-only --agent kilo >"${work}/readonly.out" 2>&1; then
+		printf 'install reported success on a read-only file\n' >&2
+		exit 1
+	fi
+	rg -qF 'file is not writable' "${work}/readonly.out"
+	[ "$(cat "${readonly_file}")" = 'user kilo' ]
+	[ ! -e "${readonly_home}/.config/agent-ready/receipt" ]
+	if run_readonly --configure-only --agent kilo --dry-run >"${work}/readonly.out" 2>&1; then
+		printf 'dry run reported success on a read-only file\n' >&2
+		exit 1
+	fi
+	rg -qF 'blocked (file is not writable)' "${work}/readonly.out"
+	# A read-only file already holding the current block needs no write.
+	chmod 644 "${readonly_file}"
+	run_readonly --configure-only --agent kilo >/dev/null 2>&1
+	chmod 444 "${readonly_file}"
+	run_readonly --configure-only --agent kilo >/dev/null 2>&1
+	# Uninstall keeps the receipt, because the block it records is still there.
+	if run_readonly --uninstall >"${work}/readonly.out" 2>&1; then
+		printf 'uninstall reported success on a read-only file\n' >&2
+		exit 1
+	fi
+	rg -qF 'agent-ready:start' "${readonly_file}"
+	[ -f "${readonly_home}/.config/agent-ready/receipt" ]
+	[ "$(find "$(dirname -- "${readonly_file}")" -type f | wc -l | tr -d ' ')" -eq 1 ]
+fi
+
+# regression: a path that cannot be created stops the run before any agent changes.
+parent_home="${work}/parent-file-home"
+mkdir -p "${parent_home}/.config"
+printf 'not a directory\n' >"${parent_home}/.config/kilo"
+if HOME="${parent_home}" XDG_CONFIG_HOME="${parent_home}/.config" PATH="${test_path}" \
+	CLAUDE_CONFIG_DIR="${parent_home}/.claude" \
+	"${root}/install.sh" --configure-only --agent claude,kilo >/dev/null 2>&1; then
+	printf 'install reported success with a file in place of a directory\n' >&2
+	exit 1
+fi
+[ ! -e "${parent_home}/.claude/CLAUDE.md" ]
+
+# regression: local edits in the legacy Cursor block need --force, like any block.
+cursor_edit_home="${work}/cursor-edit-home"
+mkdir -p "${cursor_edit_home}/.cursor"
+printf 'user cursor\n<!-- agent-ready:start -->\n<!-- agent-ready v1.4.0 sha256:%064d -->\nmy edit\n<!-- agent-ready:end -->\n' 0 \
+	>"${cursor_edit_home}/.cursor/AGENTS.md"
+run_cursor_edit() {
+	HOME="${cursor_edit_home}" XDG_CONFIG_HOME="${cursor_edit_home}/.config" PATH="${test_path}" \
+		"${root}/install.sh" --configure-only --agent cursor "$@"
+}
+if run_cursor_edit >/dev/null 2>&1; then
+	printf 'install removed local edits from the legacy Cursor block\n' >&2
+	exit 1
+fi
+rg -qF 'my edit' "${cursor_edit_home}/.cursor/AGENTS.md"
+run_cursor_edit --force >/dev/null 2>&1
+[ "$(cat "${cursor_edit_home}/.cursor/AGENTS.md")" = 'user cursor' ]
+
+# regression: an update skips a language setup whose prerequisite has gone.
+skip_bin="${work}/language-skip-bin"
+mkdir -p "${skip_bin}"
+for entry in "${base_bin}"/*; do
+	[ "${entry##*/}" = codex ] || ln -s "${entry}" "${skip_bin}/${entry##*/}"
+done
+# Automatic detection also finds a Cursor app on the machine, which needs jq.
+ln -s "$(command -v jq)" "${skip_bin}/jq"
+run_language_skip() {
+	local home="$1" agents="$2"
+	mkdir -p "${home}/.config/agent-ready/languages"
+	printf 'enabled\n' >"${home}/.config/agent-ready/languages/go"
+	printf 'schema=1\nversion=v9.9.0\nagents=%s\nconfigured=claude\nlanguages=go\ntools=none\nupdated_at=2026-11-01T00:00:00Z\n' \
+		"${agents}" >"${home}/.config/agent-ready/receipt"
+	HOME="${home}" XDG_CONFIG_HOME="${home}/.config" CLAUDE_CONFIG_DIR="${home}/.claude" \
+		CODEX_HOME="${home}/.codex" PATH="${skip_bin}" \
+		bash "${root}/agent-ready" apply-update --from v9.9.0
+}
+# gopls is missing here, whichever agents the receipt names.
+run_language_skip "${work}/skip-gopls-home" auto >"${work}/language-skip.out" 2>&1
+rg -qF 'go: skipped the auto setup' "${work}/language-skip.out"
+cp "${fake_bin}/gopls" "${skip_bin}/"
+run_language_skip "${work}/skip-codex-home" claude,codex >"${work}/language-skip.out" 2>&1
+rg -qF 'go: skipped the codex setup' "${work}/language-skip.out"
+
+# regression: an update that fails after the installer ran stays retryable.
+retry_overlay="${work}/retry-overlay"
+mkdir -p "${retry_overlay}/languages/go"
+printf '#!/bin/sh\nexit 1\n' >"${retry_overlay}/languages/go/install.sh"
+chmod +x "${retry_overlay}/languages/go/install.sh"
+publish_agent_ready v9.9.5 v9.9.5 "$(stamp_ago 48)" "${retry_overlay}"
+retry_home="${work}/retry-home"
+retry_bins="${work}/retry-launcher-bin"
+mkdir -p "${retry_home}" "${retry_bins}"
+run_release "${retry_home}" "${retry_bins}" v9.9.0 "${base_bin}" --agent codex --configure-only >/dev/null 2>&1
+mkdir -p "${retry_home}/.config/agent-ready/languages"
+printf 'enabled\n' >"${retry_home}/.config/agent-ready/languages/go"
+sed 's/^languages=$/languages=go/' "${retry_home}/.config/agent-ready/receipt" >"${work}/retry-receipt"
+cp "${work}/retry-receipt" "${retry_home}/.config/agent-ready/receipt"
+if run_update "${retry_home}" "${retry_bins}" 0 v9.9.5 >/dev/null 2>&1; then
+	printf 'update ignored a failing language installer\n' >&2
+	exit 1
+fi
+rg -qx 'version=v9.9.0' "${retry_home}/.config/agent-ready/receipt"
+[ "$(readlink "${retry_bins}/agent-ready")" = "${retry_home}/.local/share/agent-ready/versions/v9.9.0/agent-ready" ]
+[ "$(find "${retry_home}/.config/agent-ready" -name 'receipt.*' | wc -l | tr -d ' ')" -eq 0 ]
+
+# regression: uninstall offers to delete only what agent-ready installed, and names
+# the gopls MCP entries Go support added.
+hint_home="${work}/owned-hint-home"
+mkdir -p "${hint_home}/.local/bin" "${hint_home}/.config/agent-ready/languages"
+printf '#!/bin/sh\n' >"${hint_home}/.local/bin/uv"
+printf 'enabled\n' >"${hint_home}/.config/agent-ready/languages/go"
+run_owned_hint() {
+	HOME="${hint_home}" XDG_CONFIG_HOME="${hint_home}/.config" CLAUDE_CONFIG_DIR="${hint_home}/.claude" \
+		PATH="${test_path}" "${root}/install.sh" "$@"
+}
+run_owned_hint --configure-only --agent claude >/dev/null 2>&1
+run_owned_hint --uninstall >"${work}/owned-hint.out" 2>&1
+if rg -qF "${hint_home}/.local/bin/uv" "${work}/owned-hint.out"; then
+	printf 'uninstall offered to delete a tool a configure-only install never wrote\n' >&2
+	exit 1
+fi
+rg -qF 'claude mcp remove --scope user gopls' "${work}/owned-hint.out"
 
 printf 'installer routing checks passed\n'

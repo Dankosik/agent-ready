@@ -338,6 +338,26 @@ resolve_target() {
 	printf '%s\n' "${path}"
 }
 
+# Why this path cannot be written, or nothing when it can. A read-only file is the
+# user's choice, so it is refused rather than replaced by the atomic move, which
+# only needs a writable directory.
+path_problem() {
+	local path="$1" dir
+	if [ -e "${path}" ] && [ ! -w "${path}" ]; then
+		printf 'file is not writable\n'
+		return 0
+	fi
+	dir=$(dirname -- "${path}")
+	while [ ! -e "${dir}" ] && [ ! -L "${dir}" ]; do
+		dir=$(dirname -- "${dir}")
+	done
+	if [ ! -d "${dir}" ]; then
+		printf '%s is not a directory\n' "${dir}"
+	elif [ ! -w "${dir}" ]; then
+		printf 'directory %s is not writable\n' "${dir}"
+	fi
+}
+
 block_state() {
 	awk -v s="${start}" -v e="${end}" '
 		$0 == s { starts++; start_line = NR }
@@ -438,6 +458,17 @@ preflight_blocked() {
 	[ "${dry_run}" -eq 0 ] || printf '%s: blocked (%s) %s\n' "${label}" "${reason}" "${requested}"
 }
 
+# A planned write: reported when it can happen, blocked before any write when not.
+preflight_write() {
+	local label="$1" verb="$2" requested="$3" target="$4" problem
+	problem=$(path_problem "${target}")
+	if [ -n "${problem}" ]; then
+		preflight_blocked "${label}" "${requested}" other "${problem}"
+	else
+		preflight_report "${label}" "${verb}" "${requested}"
+	fi
+}
+
 preflight_instruction() {
 	local label="$1" requested="$2" body="$3" target state header digest expected
 	target=$(resolve_target "${requested}") || {
@@ -449,13 +480,13 @@ preflight_instruction() {
 		return 0
 	fi
 	if [ ! -f "${target}" ]; then
-		preflight_report "${label}" "would add" "${requested}"
+		preflight_write "${label}" "would add" "${requested}" "${target}"
 		return 0
 	fi
 	state=$(block_state "${target}")
 	case "${state}" in
 	absent)
-		preflight_report "${label}" "would add" "${requested}"
+		preflight_write "${label}" "would add" "${requested}" "${target}"
 		;;
 	invalid)
 		preflight_blocked "${label}" "${requested}" markers ""
@@ -468,7 +499,7 @@ preflight_instruction() {
 			digest="${digest%% -->*}"
 			if [ "${digest}" != "$(block_body_hash "${target}")" ]; then
 				if [ "${force}" -eq 1 ]; then
-					preflight_report "${label}" "would refresh" "${requested}"
+					preflight_write "${label}" "would refresh" "${requested}" "${target}"
 				else
 					preflight_blocked "${label}" "${requested}" edits ""
 				fi
@@ -478,7 +509,7 @@ preflight_instruction() {
 		if [ "${header}" = "${expected}" ]; then
 			preflight_report "${label}" unchanged "${requested}"
 		else
-			preflight_report "${label}" "would refresh" "${requested}"
+			preflight_write "${label}" "would refresh" "${requested}" "${target}"
 		fi
 		;;
 	esac
@@ -486,13 +517,13 @@ preflight_instruction() {
 
 # A block install is about to move must be just as safe to remove as to replace.
 preflight_stale() {
-	local id="$1" label path state
+	local id="$1" label path state target
 	label=$(agent_label "${id}")
 	# Which app created ~/.devin is unknown, so the older Windsurf may still be in
 	# use: its block stays until uninstall rather than move on install.
 	[ "${id}" != windsurf ] || return 0
 	while IFS= read -r path; do
-		if ! resolve_target "${path}" >/dev/null; then
+		if ! target=$(resolve_target "${path}"); then
 			preflight_blocked "${label}" "${path}" other "unresolvable symlink"
 			continue
 		fi
@@ -505,7 +536,7 @@ preflight_stale() {
 			if [ "${force}" -eq 0 ] && block_has_local_edits "${path}"; then
 				preflight_blocked "${label}" "${path}" edits ""
 			else
-				preflight_report "${label}" "would remove the stale block from" "${path}"
+				preflight_write "${label}" "would remove the stale block from" "${path}" "${target}"
 			fi
 			;;
 		esac
@@ -527,10 +558,19 @@ preflight_cursor() {
 	response="${cursor_dir}/hooks/agent-ready-session-start.json"
 	if [ -f "${legacy}" ]; then
 		state=$(block_state "${legacy}")
-		[ "${state}" != invalid ] || preflight_blocked "${label}" "${legacy}" markers ""
+		case "${state}" in
+		invalid) preflight_blocked "${label}" "${legacy}" markers "" ;;
+		present)
+			if [ "${force}" -eq 0 ] && block_has_local_edits "${legacy}"; then
+				preflight_blocked "${label}" "${legacy}" edits ""
+			else
+				preflight_write "${label}" "would remove the legacy block from" "${legacy}" "$(resolve_target "${legacy}")"
+			fi
+			;;
+		esac
 	fi
 	if [ ! -f "${requested}" ] && [ ! -L "${requested}" ]; then
-		preflight_report "${label}" "would add" "${requested}"
+		preflight_write "${label}" "would add" "${requested}" "${requested}"
 		return 0
 	fi
 	command -v jq >/dev/null 2>&1 || {
@@ -567,7 +607,7 @@ preflight_cursor() {
 	if [ "${current}" -eq 1 ]; then
 		preflight_report "${label}" unchanged "${requested}"
 	else
-		preflight_report "${label}" "would refresh" "${requested}"
+		preflight_write "${label}" "would refresh" "${requested}" "${hooks}"
 	fi
 }
 
@@ -583,6 +623,30 @@ preflight_all() {
 	done
 }
 
+# The whole file as it should read with this block in it.
+render_block() {
+	local target="$1" state="$2" header="$3" block="$4"
+	if [ "${state}" = present ]; then
+		awk -v s="${start}" '
+			$0 == s { print; exit }
+			{ print }
+		' "${target}"
+		printf '%s\n' "${header}"
+		block_body "${block}"
+		awk -v e="${end}" '
+			found { print }
+			$0 == e { found = 1; print }
+		' "${target}"
+	else
+		cat "${target}"
+		if [ -s "${target}" ]; then printf '\n'; fi
+		printf '%s\n' "${start}"
+		printf '%s\n' "${header}"
+		block_body "${block}"
+		printf '%s\n' "${end}"
+	fi
+}
+
 install_block() {
 	local requested="$1" label="$2" block="${3:-${routing}}" target tmp state header
 	mkdir -p "$(dirname -- "${requested}")"
@@ -596,37 +660,23 @@ install_block() {
 	}
 	header="<!-- agent-ready ${version} sha256:$(block_body "${block}" | sha256_stdin) -->"
 
-	tmp=$(mktemp "${target}.XXXXXX") || return 1
-	cp -p "${target}" "${tmp}"
-	if [ "${state}" = present ]; then
-		awk -v s="${start}" -v e="${end}" '
-			$0 == s { print; exit }
-			{ print }
-		' "${target}" >"${tmp}"
-		{
-			printf '%s\n' "${header}"
-			block_body "${block}"
-			awk -v e="${end}" '
-				found { print }
-				$0 == e { found = 1; print }
-			' "${target}"
-		} >>"${tmp}"
-	else
-		{
-			cat "${target}"
-			[ -s "${target}" ] && printf '\n'
-			printf '%s\n' "${start}"
-			printf '%s\n' "${header}"
-			block_body "${block}"
-			printf '%s\n' "${end}"
-		} >"${tmp}"
-	fi
-	if cmp -s "${target}" "${tmp}"; then
-		rm -f "${tmp}"
+	# Compared before any write, so a read-only file needing no change is fine. The
+	# x keeps a trailing newline from being stripped by the substitution.
+	if [ "$(render_block "${target}" "${state}" "${header}" "${block}"; printf x)" = "$(cat "${target}"; printf x)" ]; then
 		printf '%s: routing already configured in %s\n' "${label}" "${requested}"
 		return 0
 	fi
-	mv "${tmp}" "${target}"
+	tmp=$(mktemp "${target}.XXXXXX") || return 1
+	if ! cp -p "${target}" "${tmp}" ||
+		! render_block "${target}" "${state}" "${header}" "${block}" >"${tmp}"; then
+		rm -f "${tmp}"
+		printf '%s: could not write %s\n' "${label}" "${requested}" >&2
+		return 1
+	fi
+	mv "${tmp}" "${target}" || {
+		rm -f "${tmp}"
+		return 1
+	}
 	printf '%s: %s routing block in %s\n' "${label}" "$([ "${state}" = present ] && printf refreshed || printf added)" "${requested}"
 }
 
@@ -651,7 +701,7 @@ remove_block() {
 	}
 	# Install writes one blank line before a block it appends; drop that same
 	# separator so the file returns to the bytes it had before the install.
-	awk -v s="${start}" -v e="${end}" '
+	if ! awk -v s="${start}" -v e="${end}" '
 		function flush() { if (have) print prev; have = 0 }
 		$0 == s {
 			if (have && prev == "") have = 0
@@ -667,7 +717,11 @@ remove_block() {
 			have = 1
 		}
 		END { flush() }
-	' "${target}" >"${tmp}"
+	' "${target}" >"${tmp}"; then
+		rm -f "${tmp}"
+		printf '%s: could not write %s\n' "${label}" "${requested}" >&2
+		return 1
+	fi
 	mv "${tmp}" "${target}" || {
 		rm -f "${tmp}"
 		return 1
@@ -885,7 +939,7 @@ uninstall_preflight_file() {
 			preflight_blocked "${label}" "${requested}" edits ""
 			return 0
 		fi
-		preflight_report "${label}" "would remove" "${requested}"
+		preflight_write "${label}" "would remove" "${requested}" "${target}"
 		;;
 	esac
 }
@@ -910,10 +964,10 @@ uninstall_preflight_cursor() {
 					if [ "${digest}" != "$(block_body_hash "${target}")" ] && [ "${force}" -eq 0 ]; then
 						preflight_blocked "Cursor" "${legacy}" edits ""
 					else
-						preflight_report "Cursor" "would remove legacy routing block from" "${legacy}"
+						preflight_write "Cursor" "would remove legacy routing block from" "${legacy}" "${target}"
 					fi
 				else
-					preflight_report "Cursor" "would remove legacy routing block from" "${legacy}"
+					preflight_write "Cursor" "would remove legacy routing block from" "${legacy}" "${target}"
 				fi
 				;;
 			esac
@@ -937,7 +991,7 @@ uninstall_preflight_cursor() {
 		elif jq -e --arg command 'cat ./hooks/agent-ready-session-start.json' \
 			'([.hooks.sessionStart[]? | select((type == "object") and (.command == $command))] | length) > 0' \
 			"${hooks}" >/dev/null 2>&1; then
-			preflight_report "Cursor" "would remove the session hook" "${requested}"
+			preflight_write "Cursor" "would remove the session hook" "${requested}" "${hooks}"
 		fi
 	fi
 	response="${cursor_dir}/hooks/agent-ready-session-start.json"
@@ -1066,7 +1120,7 @@ uninstall_state() {
 }
 
 uninstall_tools_hint() {
-	local mode tool bin formula names='' paths='' bundle
+	local mode tool bin formula names='' paths='' bundle gemini_file
 	mode="${receipt_tools:-$(receipt_legacy_tools)}"
 	if [ "${mode}" = brew ]; then
 		for tool in rtk:rtk rg:ripgrep ast-grep:ast-grep sd:sd uv:uv jq:jq yq:yq mdq:mdq \
@@ -1081,7 +1135,8 @@ uninstall_tools_hint() {
 			printf '\nTools are still installed; agent-ready does not remove them:\n'
 			printf '  brew uninstall %s\n' "${names}"
 		fi
-	else
+	# A configure-only install put nothing here, so whatever is there is the user's.
+	elif [ "${mode}" = binaries ]; then
 		for bin in rtk rg ast-grep sd uv uvx jq yq mdq gh wt git-wt difft gitleaks \
 			actionlint shellcheck hyperfine osv-scanner gopls; do
 			[ ! -e "${uninstall_bin_dir}/${bin}" ] ||
@@ -1107,7 +1162,18 @@ uninstall_tools_hint() {
 	# The plain command reaches only Claude Code, OpenCode, and Cursor.
 	for id in ${uninstall_agents}; do
 		case "${id}" in
-		codex | gemini | copilot)
+		# rtk 1.1.0 deletes the whole GEMINI.md here, whatever else it holds, and
+		# Antigravity reads that file too, so the command keeps a copy around it.
+		gemini)
+			gemini_file="${HOME}/.gemini/GEMINI.md"
+			if [ -e "${gemini_file}" ] || [ -L "${gemini_file}" ]; then
+				printf '  RTK integration for %s (rtk deletes GEMINI.md, so this restores it): cp -Pp %q %q && rtk init -g --gemini --uninstall; mv %q %q\n' \
+					"$(agent_label "${id}")" "${gemini_file}" "${gemini_file}.keep" "${gemini_file}.keep" "${gemini_file}"
+			else
+				printf '  RTK integration for %s: rtk init -g --gemini --uninstall\n' "$(agent_label "${id}")"
+			fi
+			;;
+		codex | copilot)
 			printf '  RTK integration for %s: rtk init -g --%s --uninstall\n' "$(agent_label "${id}")" "${id}"
 			;;
 		antigravity | pi)
@@ -1116,6 +1182,15 @@ uninstall_tools_hint() {
 		esac
 	done
 	printf '  CodeGraph MCP wiring: codegraph uninstall --location global --keep-cli --target <agents>\n'
+	if [ "${uninstall_go}" -eq 1 ]; then
+		for id in ${uninstall_agents}; do
+			case "${id}" in
+			claude) printf '  gopls MCP for Claude Code: claude mcp remove --scope user gopls\n' ;;
+			codex) printf '  gopls MCP for Codex: codex mcp remove gopls\n' ;;
+			cursor) printf '  gopls MCP for Cursor: delete mcpServers.gopls from %s\n' "${HOME}/.cursor/mcp.json" ;;
+			esac
+		done
+	fi
 }
 
 uninstall_main() {
@@ -1127,6 +1202,9 @@ uninstall_main() {
 		receipt_read "${receipt}" || return 1
 		uninstall_receipt_present=1
 	fi
+	# Read now, because uninstall_state removes it before the hint is printed.
+	uninstall_go=0
+	if [ -f "$(dirname -- "${receipt}")/languages/go" ]; then uninstall_go=1; fi
 	uninstall_collect_agents
 	for id in ${uninstall_agents}; do
 		if [ "${id}" = cursor ]; then
