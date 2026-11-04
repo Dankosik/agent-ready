@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+# These point the installer at agent configuration; a developer's own values must
+# not route a test at real files.
+unset DSH_HOME PI_CODING_AGENT_DIR
+
 root=$(cd -- "$(dirname -- "$0")" && pwd)
 work=$(mktemp -d)
 cleanup() { rm -rf "${work}"; }
@@ -20,7 +24,7 @@ fake_bin="${work}/bin"
 test_path="${fake_bin}:${PATH}"
 mkdir -p "${fake_home}" "${fake_bin}"
 
-for command in claude codex cursor-agent gemini copilot windsurf grok opencode qwen cline kilo crush goose; do
+for command in claude codex cursor-agent gemini agy copilot windsurf grok opencode qwen cline kilo crush goose dsh pi; do
 	printf '#!/bin/sh\nexit 0\n' >"${fake_bin}/${command}"
 	chmod +x "${fake_bin}/${command}"
 done
@@ -58,6 +62,8 @@ mkdir -p \
 	"${fake_home}/.config/kilo" \
 	"${fake_home}/.config/crush" \
 	"${fake_home}/.config/goose" \
+	"${fake_home}/.dsh" \
+	"${fake_home}/.pi/agent" \
 	"${fake_home}/dotfiles"
 printf 'user claude\n' >"${fake_home}/dotfiles/CLAUDE.md"
 ln -s ../dotfiles/CLAUDE.md "${fake_home}/.claude/CLAUDE.md"
@@ -71,6 +77,8 @@ printf 'user cline\n' >"${fake_home}/cline-data/settings/rules/agent-ready.md"
 printf 'user kilo\n' >"${fake_home}/.config/kilo/AGENTS.md"
 printf 'user crush\n' >"${fake_home}/.config/crush/CRUSH.md"
 printf 'user goose\n' >"${fake_home}/.config/goose/AGENTS.md"
+printf 'user dsh\n' >"${fake_home}/.dsh/AGENTS.md"
+printf 'user pi\n' >"${fake_home}/.pi/agent/AGENTS.md"
 cat >"${fake_home}/.cursor/AGENTS.md" <<EOF
 user cursor
 <!-- agent-ready:start -->
@@ -103,11 +111,13 @@ install_targets=(
 	"${fake_home}/.config/kilo/AGENTS.md"
 	"${fake_home}/.config/crush/CRUSH.md"
 	"${fake_home}/.config/goose/AGENTS.md"
+	"${fake_home}/.dsh/AGENTS.md"
+	"${fake_home}/.pi/agent/AGENTS.md"
 	"${fake_home}/.cursor/AGENTS.md"
 	"${fake_home}/.cursor/hooks.json"
 	"${fake_home}/.cursor/hooks/agent-ready-session-start.json"
 )
-block_targets=("${install_targets[@]:0:12}")
+block_targets=("${install_targets[@]:0:14}")
 
 block_header() {
 	awk -v s='<!-- agent-ready:start -->' -v e='<!-- agent-ready:end -->' '
@@ -189,7 +199,9 @@ for target in \
 	"${fake_home}/cline-data/settings/rules/agent-ready.md" \
 	"${fake_home}/.config/kilo/AGENTS.md" \
 	"${fake_home}/.config/crush/CRUSH.md" \
-	"${fake_home}/.config/goose/AGENTS.md"; do
+	"${fake_home}/.config/goose/AGENTS.md" \
+	"${fake_home}/.dsh/AGENTS.md" \
+	"${fake_home}/.pi/agent/AGENTS.md"; do
 	[ "$(rg -c '^<!-- agent-ready:start -->$' "${target}")" -eq 1 ]
 	[ "$(rg -c '^<!-- agent-ready:end -->$' "${target}")" -eq 1 ]
 	rg -q '^Tool routing \(use instead of defaults\):$' "${target}"
@@ -254,6 +266,8 @@ rg -q '^user cline$' "${fake_home}/cline-data/settings/rules/agent-ready.md"
 rg -q '^user kilo$' "${fake_home}/.config/kilo/AGENTS.md"
 rg -q '^user crush$' "${fake_home}/.config/crush/CRUSH.md"
 rg -q '^user goose$' "${fake_home}/.config/goose/AGENTS.md"
+rg -q '^user dsh$' "${fake_home}/.dsh/AGENTS.md"
+rg -q '^user pi$' "${fake_home}/.pi/agent/AGENTS.md"
 rg -q '^user cursor$' "${fake_home}/.cursor/AGENTS.md"
 if rg -q 'agent-ready:' "${fake_home}/.cursor/AGENTS.md"; then
 	printf 'legacy Cursor routing block was not removed\n' >&2
@@ -312,7 +326,9 @@ for expected in \
 	'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
 	'init -g --gemini --hook-only --auto-patch --no-trust-filters' \
 	'init -g --copilot --hook-only --auto-patch --no-trust-filters' \
-	'init -g --opencode --hook-only --no-patch --no-trust-filters'; do
+	'init -g --opencode --hook-only --no-patch --no-trust-filters' \
+	'init -g --agent antigravity --hook-only --no-patch --no-trust-filters' \
+	'init -g --agent pi --hook-only --no-patch --no-trust-filters'; do
 	rg -qF "${expected}" "${fake_home}/rtk-calls"
 done
 
@@ -361,7 +377,7 @@ receipt="${fake_home}/.config/agent-ready/receipt"
 rg -qx 'schema=1' "${receipt}"
 rg -qx "version=${version}" "${receipt}"
 rg -qx 'agents=auto' "${receipt}"
-rg -qx 'configured=claude,cline,codex,copilot,crush,cursor,gemini,goose,grok,kilo,opencode,qwen,windsurf' "${receipt}"
+rg -qx 'configured=antigravity,claude,cline,codex,copilot,crush,cursor,dsh,gemini,goose,grok,kilo,opencode,pi,qwen,windsurf' "${receipt}"
 rg -qx 'languages=go' "${receipt}"
 rg -qx 'tools=brew' "${receipt}"
 rg -qx 'updated_at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' "${receipt}"
@@ -1671,6 +1687,7 @@ mkdir -p "${uninstall_originals}" "${uninstall_home}/.claude" "${uninstall_home}
 	"${uninstall_home}/.qwen" "${uninstall_home}/.cline/data/settings/rules" \
 	"${uninstall_home}/.config/kilo" "${uninstall_home}/.config/crush" \
 	"${uninstall_home}/.config/goose" "${uninstall_home}/.cursor" \
+	"${uninstall_home}/.dsh" "${uninstall_home}/.pi/agent" \
 	"${uninstall_home}/.config/agent-ready/languages" "${uninstall_bins}"
 printf 'user claude\n' >"${uninstall_home}/dotfiles/CLAUDE.md"
 ln -s ../dotfiles/CLAUDE.md "${uninstall_home}/.claude/CLAUDE.md"
@@ -1684,6 +1701,8 @@ printf 'user cline\n' >"${uninstall_home}/.cline/data/settings/rules/agent-ready
 printf 'user kilo\n' >"${uninstall_home}/.config/kilo/AGENTS.md"
 printf 'user crush\n' >"${uninstall_home}/.config/crush/CRUSH.md"
 printf 'user goose\n' >"${uninstall_home}/.config/goose/AGENTS.md"
+printf 'user dsh\n' >"${uninstall_home}/.dsh/AGENTS.md"
+printf 'user pi\n' >"${uninstall_home}/.pi/agent/AGENTS.md"
 printf 'enabled\n' >"${uninstall_home}/.config/agent-ready/languages/go"
 cat >"${uninstall_home}/.cursor/hooks.json" <<'EOF'
 {
@@ -1706,6 +1725,8 @@ uninstall_user_targets=(
 	"${uninstall_home}/.config/kilo/AGENTS.md"
 	"${uninstall_home}/.config/crush/CRUSH.md"
 	"${uninstall_home}/.config/goose/AGENTS.md"
+	"${uninstall_home}/.dsh/AGENTS.md"
+	"${uninstall_home}/.pi/agent/AGENTS.md"
 )
 for target in "${uninstall_user_targets[@]}"; do
 	cp -p "${target}" "${uninstall_originals}/$(printf '%s' "${target}" | tr '/' '_')"
@@ -1713,7 +1734,7 @@ done
 
 publish_agent_ready v9.9.4
 run_release "${uninstall_home}" "${uninstall_bins}" v9.9.4 "${test_path}" \
-	--agent claude,codex,cursor,gemini,copilot,windsurf,grok,opencode,qwen,cline,kilo,crush,goose \
+	--agent claude,codex,cursor,gemini,antigravity,copilot,windsurf,grok,opencode,qwen,cline,kilo,crush,goose,dsh,pi \
 	--configure-only >"${work}/uninstall-install.out"
 [ -L "${uninstall_bins}/agent-ready" ]
 [ "$(readlink "${uninstall_bins}/agent-ready")" = "${uninstall_versions}/v9.9.4/agent-ready" ]
@@ -1865,5 +1886,146 @@ HOME="${uninstall_state_home}" XDG_CONFIG_HOME="${uninstall_state_home}/.config"
 	PATH="${base_bin}" "${root}/install.sh" --uninstall >"${work}/uninstall-state.out"
 [ ! -e "${uninstall_state_config}/binaries" ]
 [ ! -e "${uninstall_state_config}/codegraph" ]
+
+# Aliases resolve to canonical ids, and CodeGraph gets only the targets it has.
+new_agents_home="${work}/new-agents-home"
+mkdir -p "${new_agents_home}"
+HOME="${new_agents_home}" XDG_CONFIG_HOME="${new_agents_home}/.config" PATH="${test_path}" \
+	"${root}/install.sh" --agent agy,deepseek-harness,pi-coding-agent --configure-only \
+	>"${work}/new-agents.out" 2>&1
+rg -qx 'agents=antigravity,dsh,pi' "${new_agents_home}/.config/agent-ready/receipt"
+rg -qxF 'install --yes --target=antigravity --location=global --no-permissions' \
+	"${new_agents_home}/codegraph-calls"
+rg -qF 'MCP setup is not available for dsh' "${work}/new-agents.out"
+rg -qF 'MCP setup is not available for pi' "${work}/new-agents.out"
+rg -q '^Tool routing \(use instead of defaults\):$' "${new_agents_home}/.dsh/AGENTS.md"
+rg -q '^Tool routing \(use instead of defaults\):$' "${new_agents_home}/.pi/agent/AGENTS.md"
+# Without Gemini nothing writes CodeGraph's section, so the block keeps the line.
+rg -qF 'Code graph: index of symbols, calls, imports' "${new_agents_home}/.gemini/GEMINI.md"
+
+# The launcher accepts every selector the installer does.
+launcher_home="${work}/launcher-home"
+mkdir -p "${launcher_home}"
+for selector in antigravity antigravity-cli agy dsh deepseek-harness pi pi-coding-agent; do
+	HOME="${launcher_home}" XDG_CONFIG_HOME="${launcher_home}/.config" PATH="${test_path}" \
+		"${root}/agent-ready" "${selector}" --configure-only >/dev/null 2>&1
+done
+rg -qx 'agents=antigravity,dsh,pi' "${launcher_home}/.config/agent-ready/receipt"
+
+# DSH_HOME and PI_CODING_AGENT_DIR move the files those agents read.
+moved_home="${work}/moved-home"
+mkdir -p "${moved_home}"
+HOME="${moved_home}" XDG_CONFIG_HOME="${moved_home}/.config" PATH="${test_path}" \
+	DSH_HOME="${moved_home}/dsh-home" PI_CODING_AGENT_DIR="${moved_home}/pi-home" \
+	"${root}/install.sh" --agent dsh,pi --configure-only >/dev/null 2>&1
+rg -q '^Tool routing' "${moved_home}/dsh-home/AGENTS.md"
+rg -q '^Tool routing' "${moved_home}/pi-home/AGENTS.md"
+[ ! -e "${moved_home}/.dsh" ]
+[ ! -e "${moved_home}/.pi/agent/AGENTS.md" ]
+
+# Gemini and Antigravity share one file: one block in either order, stable across
+# reruns, and a dry run agrees. The fake CodeGraph writes no section, so the
+# block is what is being compared.
+shared_home="${work}/shared-home"
+mkdir -p "${shared_home}/.gemini"
+printf 'user gemini\n' >"${shared_home}/.gemini/GEMINI.md"
+run_shared() {
+	HOME="${shared_home}" XDG_CONFIG_HOME="${shared_home}/.config" PATH="${test_path}" \
+		"${root}/install.sh" --configure-only "$@"
+}
+run_shared --agent gemini,antigravity >/dev/null 2>&1
+[ "$(rg -c '^<!-- agent-ready:start -->$' "${shared_home}/.gemini/GEMINI.md")" -eq 1 ]
+if rg -q '^- Code graph:' "${shared_home}/.gemini/GEMINI.md"; then
+	printf 'shared Gemini block repeats the CodeGraph rule\n' >&2
+	exit 1
+fi
+shared_digest=$(digest_of "${shared_home}/.gemini/GEMINI.md")
+run_shared --agent antigravity,gemini >/dev/null 2>&1
+[ "$(digest_of "${shared_home}/.gemini/GEMINI.md")" = "${shared_digest}" ]
+run_shared --agent gemini,antigravity --dry-run >"${work}/shared-dry.out" 2>&1
+if rg -q 'would (add|refresh)' "${work}/shared-dry.out"; then
+	printf 'dry run of the shared Gemini file reported pending changes\n' >&2
+	exit 1
+fi
+rg -q '^user gemini$' "${shared_home}/.gemini/GEMINI.md"
+
+# Pi loads only the first context file in its directory. A new AGENTS.md would
+# hide the user's CLAUDE.md, and an AGENTS.md beside an override would never load.
+pi_claude_home="${work}/pi-claude-home"
+mkdir -p "${pi_claude_home}/.pi/agent"
+printf 'user pi claude\n' >"${pi_claude_home}/.pi/agent/CLAUDE.md"
+HOME="${pi_claude_home}" XDG_CONFIG_HOME="${pi_claude_home}/.config" PATH="${test_path}" \
+	"${root}/install.sh" --agent pi --configure-only >/dev/null 2>&1
+[ ! -e "${pi_claude_home}/.pi/agent/AGENTS.md" ]
+rg -q '^user pi claude$' "${pi_claude_home}/.pi/agent/CLAUDE.md"
+rg -q '^Tool routing' "${pi_claude_home}/.pi/agent/CLAUDE.md"
+pi_override_home="${work}/pi-override-home"
+mkdir -p "${pi_override_home}/.pi/agent"
+printf 'user pi agents\n' >"${pi_override_home}/.pi/agent/AGENTS.md"
+printf 'user pi override\n' >"${pi_override_home}/.pi/agent/AGENTS.override.md"
+HOME="${pi_override_home}" XDG_CONFIG_HOME="${pi_override_home}/.config" PATH="${test_path}" \
+	"${root}/install.sh" --agent pi --configure-only >/dev/null 2>&1
+rg -q '^Tool routing' "${pi_override_home}/.pi/agent/AGENTS.override.md"
+[ "$(cat "${pi_override_home}/.pi/agent/AGENTS.md")" = 'user pi agents' ]
+
+# Auto-detection finds an npx-only DeepSeek Harness by its home directory, and an
+# Antigravity desktop install by the directory CodeGraph also detects. No agent
+# command is on PATH; a machine's own apps may still add agents to the receipt.
+detect_bin="${work}/detect-bin"
+mkdir -p "${detect_bin}"
+cp "${fake_bin}/rtk" "${detect_bin}/rtk"
+ln -s "$(command -v jq)" "${detect_bin}/jq"
+detect_home="${work}/detect-home"
+mkdir -p "${detect_home}/.dsh" "${detect_home}/.gemini/antigravity"
+HOME="${detect_home}" XDG_CONFIG_HOME="${detect_home}/.config" \
+	PATH="${detect_bin}:${base_bin}" "${root}/install.sh" --configure-only >/dev/null 2>&1
+rg -q '^Tool routing' "${detect_home}/.dsh/AGENTS.md"
+rg -q '^Tool routing' "${detect_home}/.gemini/GEMINI.md"
+rg -q '^configured=antigravity,.*dsh' "${detect_home}/.config/agent-ready/receipt"
+
+# An existing rtk may predate these integrations, and installs do not upgrade it.
+# The routing block is still written and the run still succeeds.
+old_rtk_bin="${work}/old-rtk-bin"
+mkdir -p "${old_rtk_bin}"
+cat >"${old_rtk_bin}/rtk" <<'EOF'
+#!/bin/sh
+printf "error: invalid value for '--agent'\n" >&2
+exit 2
+EOF
+chmod +x "${old_rtk_bin}/rtk"
+old_rtk_home="${work}/old-rtk-home"
+mkdir -p "${old_rtk_home}"
+HOME="${old_rtk_home}" XDG_CONFIG_HOME="${old_rtk_home}/.config" \
+	PATH="${old_rtk_bin}:${test_path}" "${root}/install.sh" --agent antigravity,pi --configure-only \
+	>"${work}/old-rtk.out" 2>&1
+rg -qF 'Pi: RTK integration failed' "${work}/old-rtk.out"
+rg -qF 'Google Antigravity: RTK integration failed' "${work}/old-rtk.out"
+rg -q '^Tool routing' "${old_rtk_home}/.pi/agent/AGENTS.md"
+rg -q '^Tool routing' "${old_rtk_home}/.gemini/GEMINI.md"
+
+# Uninstall names the agent that configured the shared file and gives the RTK
+# commands that actually remove these integrations. A Gemini-only install must
+# not report Antigravity at all.
+agy_home="${work}/agy-home"
+mkdir -p "${agy_home}/.gemini"
+printf 'user gemini\n' >"${agy_home}/.gemini/GEMINI.md"
+run_uninstall_checkout_install "${agy_home}" --agent antigravity,pi >/dev/null 2>&1
+run_uninstall_checkout "${agy_home}" >"${work}/agy-uninstall.out" 2>&1
+[ "$(cat "${agy_home}/.gemini/GEMINI.md")" = 'user gemini' ]
+rg -qF 'rtk init -g --agent antigravity --uninstall' "${work}/agy-uninstall.out"
+rg -qF 'rtk init -g --agent pi --uninstall' "${work}/agy-uninstall.out"
+if rg -q '^Gemini CLI:' "${work}/agy-uninstall.out"; then
+	printf 'uninstall reported Gemini CLI for an Antigravity-only file\n' >&2
+	exit 1
+fi
+gemini_only_home="${work}/gemini-only-home"
+mkdir -p "${gemini_only_home}/.gemini"
+run_uninstall_checkout_install "${gemini_only_home}" --agent gemini >/dev/null 2>&1
+run_uninstall_checkout "${gemini_only_home}" >"${work}/gemini-only-uninstall.out" 2>&1
+rg -q '^Gemini CLI:' "${work}/gemini-only-uninstall.out"
+if rg -q 'Antigravity|antigravity' "${work}/gemini-only-uninstall.out"; then
+	printf 'uninstall reported Antigravity for a Gemini-only file\n' >&2
+	exit 1
+fi
 
 printf 'installer routing checks passed\n'

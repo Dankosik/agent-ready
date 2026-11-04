@@ -3,7 +3,7 @@
 # later update can repeat the install. It is read as data only: never sourced,
 # never evaluated.
 
-receipt_agent_ids='claude codex cursor gemini copilot windsurf grok opencode qwen cline kilo crush goose'
+receipt_agent_ids='claude codex cursor gemini antigravity copilot windsurf grok opencode qwen cline kilo crush goose dsh pi'
 
 receipt_path() {
 	printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready/receipt"

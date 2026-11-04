@@ -20,7 +20,7 @@ force=0
 dry_run=0
 uninstall=0
 usage() {
-	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose|<name>,...] [--configure-only|--upgrade] [--binaries] [--force] [--dry-run]\n' "$0" >&2
+	printf 'usage: %s [--agent auto|claude|codex|cursor|gemini|antigravity|copilot|windsurf|grok|opencode|qwen|cline|kilo|crush|goose|dsh|pi|<name>,...] [--configure-only|--upgrade] [--binaries] [--force] [--dry-run]\n' "$0" >&2
 	printf '       %s --uninstall [--force] [--dry-run]\n' "$0" >&2
 }
 
@@ -78,7 +78,10 @@ normalise_agent() {
 	open-code) printf 'opencode\n' ;;
 	qwen-code) printf 'qwen\n' ;;
 	kilocode | kilo-code) printf 'kilo\n' ;;
-	claude | codex | cursor | gemini | copilot | windsurf | grok | opencode | qwen | cline | kilo | crush | goose)
+	agy | antigravity-cli) printf 'antigravity\n' ;;
+	deepseek-harness) printf 'dsh\n' ;;
+	pi-coding-agent) printf 'pi\n' ;;
+	claude | codex | cursor | gemini | antigravity | copilot | windsurf | grok | opencode | qwen | cline | kilo | crush | goose | dsh | pi)
 		printf '%s\n' "$1"
 		;;
 	*) return 1 ;;
@@ -109,6 +112,7 @@ agent_label() {
 	codex) printf 'Codex' ;;
 	cursor) printf 'Cursor' ;;
 	gemini) printf 'Gemini CLI' ;;
+	antigravity) printf 'Google Antigravity' ;;
 	copilot) printf 'GitHub Copilot CLI' ;;
 	windsurf) printf 'Windsurf' ;;
 	grok) printf 'Grok Build' ;;
@@ -118,14 +122,31 @@ agent_label() {
 	kilo) printf 'Kilo Code' ;;
 	crush) printf 'Crush' ;;
 	goose) printf 'goose' ;;
+	dsh) printf 'DeepSeek Harness' ;;
+	pi) printf 'Pi' ;;
 	esac
+}
+
+# Pi reads only the first of these files that exists in its agent directory, so
+# a new AGENTS.md would silently hide a user's CLAUDE.md, and an override would
+# hide the block. The block goes in whichever file Pi actually loads.
+pi_instructions() {
+	local dir="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}" name
+	for name in AGENTS.override.md AGENTS.md AGENTS.MD CLAUDE.md CLAUDE.MD; do
+		if [ -f "${dir}/${name}" ]; then
+			printf '%s\n' "${dir}/${name}"
+			return 0
+		fi
+	done
+	printf '%s\n' "${dir}/AGENTS.md"
 }
 
 agent_instructions() {
 	case "$1" in
 	claude) printf '%s\n' "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" ;;
 	codex) printf '%s\n' "${CODEX_HOME:-${HOME}/.codex}/AGENTS.md" ;;
-	gemini) printf '%s\n' "${HOME}/.gemini/GEMINI.md" ;;
+	# Antigravity shares Gemini CLI's global file.
+	gemini | antigravity) printf '%s\n' "${HOME}/.gemini/GEMINI.md" ;;
 	copilot) printf '%s\n' "${COPILOT_HOME:-${HOME}/.copilot}/copilot-instructions.md" ;;
 	windsurf) printf '%s\n' "${HOME}/.codeium/windsurf/memories/global_rules.md" ;;
 	grok) printf '%s\n' "${GROK_HOME:-${HOME}/.grok}/rules/agent-ready.md" ;;
@@ -135,6 +156,8 @@ agent_instructions() {
 	kilo) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/kilo/AGENTS.md" ;;
 	crush) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/crush/CRUSH.md" ;;
 	goose) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/goose/AGENTS.md" ;;
+	dsh) printf '%s\n' "${DSH_HOME:-${HOME}/.dsh}/AGENTS.md" ;;
+	pi) pi_instructions ;;
 	esac
 }
 
@@ -143,6 +166,16 @@ agent_instructions() {
 agent_block() {
 	case "$1" in
 	claude | codex | gemini | opencode) printf '%s\n' "${graph_routing}" ;;
+	# CodeGraph's Antigravity target writes only MCP config, so the shared file
+	# gets its section only through Gemini: an explicit gemini, or auto, which
+	# wires Gemini whenever ~/.gemini exists. Both ids must render one block.
+	antigravity)
+		if [ "${auto_detection}" -eq 1 ] || agent_selected gemini; then
+			printf '%s\n' "${graph_routing}"
+		else
+			printf '%s\n' "${routing}"
+		fi
+		;;
 	*) printf '%s\n' "${routing}" ;;
 	esac
 }
@@ -156,6 +189,10 @@ detect_cursor() {
 		[ -d /Applications/Cursor.app ] || [ -d "${HOME}/Applications/Cursor.app" ]
 }
 detect_gemini() { command -v gemini >/dev/null 2>&1; }
+detect_antigravity() {
+	command -v agy >/dev/null 2>&1 || [ -d "${HOME}/.gemini/antigravity" ] ||
+		[ -d /Applications/Antigravity.app ] || [ -d "${HOME}/Applications/Antigravity.app" ]
+}
 detect_copilot() { command -v copilot >/dev/null 2>&1; }
 detect_windsurf() {
 	command -v windsurf >/dev/null 2>&1 ||
@@ -168,8 +205,12 @@ detect_cline() { command -v cline >/dev/null 2>&1; }
 detect_kilo() { command -v kilo >/dev/null 2>&1; }
 detect_crush() { command -v crush >/dev/null 2>&1; }
 detect_goose() { command -v goose >/dev/null 2>&1; }
+# DeepSeek Harness is documented through npx, which leaves no dsh on PATH, so its
+# home directory counts too.
+detect_dsh() { command -v dsh >/dev/null 2>&1 || [ -d "${DSH_HOME:-${HOME}/.dsh}" ]; }
+detect_pi() { command -v pi >/dev/null 2>&1; }
 
-agent_ids="claude codex cursor gemini copilot windsurf grok opencode qwen cline kilo crush goose"
+agent_ids="claude codex cursor gemini antigravity copilot windsurf grok opencode qwen cline kilo crush goose dsh pi"
 auto_detection=0
 selected_agents=
 # The canonical comma list of this run's explicit agents, in the order given.
@@ -516,6 +557,17 @@ configure_rtk() {
 	printf '%s: configured RTK integration\n' "${label}"
 }
 
+# Installs never upgrade tools by default, so an existing rtk may predate these
+# integrations. The routing block still works without the hook.
+configure_rtk_optional() {
+	local label="$1" agent_id="$2"
+	if rtk init -g --agent "${agent_id}" --hook-only --no-patch --no-trust-filters; then
+		printf '%s: configured RTK integration\n' "${label}"
+	else
+		printf '%s: RTK integration failed; upgrade rtk and run rtk init -g --agent %s\n' "${label}" "${agent_id}" >&2
+	fi
+}
+
 install_cursor_hook() {
 	local cursor_dir="${HOME}/.cursor" response hooks requested tmp command
 	command -v jq >/dev/null 2>&1 || {
@@ -580,7 +632,7 @@ configure_codegraph() {
 	else
 		for id in ${selected_agents}; do
 			case "${id}" in
-			claude | codex | cursor | opencode | gemini) target="${id}" ;;
+			claude | codex | cursor | opencode | gemini | antigravity) target="${id}" ;;
 			copilot) target=copilot-cli ;;
 			*)
 				printf 'CodeGraph: MCP setup is not available for %s; the CLI routing still applies\n' "${id}" >&2
@@ -659,6 +711,14 @@ uninstall_collect_agents() {
 				uninstall_agents="${uninstall_agents} ${id}"
 			fi
 			continue
+		fi
+		# Gemini and Antigravity share one file: markers there name one agent,
+		# Antigravity only when the receipt says it alone configured the file.
+		[ "${id}" != antigravity ] || continue
+		if [ "${id}" = gemini ] && [ "${uninstall_receipt_present}" -eq 1 ]; then
+			case ",${receipt_configured}," in
+			*,antigravity,*) continue ;;
+			esac
 		fi
 		path=$(agent_instructions "${id}")
 		[ -f "${path}" ] || [ -L "${path}" ] || continue
@@ -904,6 +964,14 @@ uninstall_tools_hint() {
 		printf '  codegraph bundle: rm -rf %s %s\n' "${bundle}" "${uninstall_bin_dir}/codegraph"
 	fi
 	printf '  RTK integration: rtk init -g --uninstall\n'
+	# The plain command does not reach these two RTK integrations.
+	for id in ${uninstall_agents}; do
+		case "${id}" in
+		antigravity | pi)
+			printf '  RTK integration for %s: rtk init -g --agent %s --uninstall\n' "$(agent_label "${id}")" "${id}"
+			;;
+		esac
+	done
 	printf '  CodeGraph MCP wiring: codegraph uninstall --location global --keep-cli --target <agents>\n'
 }
 
@@ -1109,6 +1177,11 @@ if agent_selected gemini; then
 	configure_rtk "$(agent_label gemini)" -g --gemini --hook-only --auto-patch --no-trust-filters
 	install_block "$(agent_instructions gemini)" "$(agent_label gemini)" "$(agent_block gemini)"
 fi
+if agent_selected antigravity; then
+	found=1
+	configure_rtk_optional "$(agent_label antigravity)" antigravity
+	install_block "$(agent_instructions antigravity)" "$(agent_label antigravity)" "$(agent_block antigravity)"
+fi
 if agent_selected copilot; then
 	found=1
 	configure_rtk "$(agent_label copilot)" -g --copilot --hook-only --auto-patch --no-trust-filters
@@ -1147,6 +1220,15 @@ fi
 if agent_selected goose; then
 	found=1
 	install_block "$(agent_instructions goose)" "$(agent_label goose)" "$(agent_block goose)"
+fi
+if agent_selected dsh; then
+	found=1
+	install_block "$(agent_instructions dsh)" "$(agent_label dsh)" "$(agent_block dsh)"
+fi
+if agent_selected pi; then
+	found=1
+	configure_rtk_optional "$(agent_label pi)" pi
+	install_block "$(agent_instructions pi)" "$(agent_label pi)" "$(agent_block pi)"
 fi
 
 # Run last: a malformed instructions file must stop the installer before a
