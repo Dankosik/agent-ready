@@ -203,7 +203,8 @@ in its agent directory, so the block joins an existing `AGENTS.override.md` or
 `CLAUDE.md` rather than hide it behind a new `AGENTS.md`. Codex likewise reads a
 non-empty `AGENTS.override.md` instead of `AGENTS.md`. When the file an agent
 loads changes, the next run moves the block there, and uninstall removes a block
-from either file.
+from either file. A block in the older Windsurf file stays until uninstall,
+because that app may still be in use alongside `~/.devin`.
 
 ## What's installed
 

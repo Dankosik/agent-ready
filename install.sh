@@ -204,12 +204,22 @@ agent_stale_candidates() {
 	esac
 }
 
-# -ef because AGENTS.md and AGENTS.MD are one file on a case-insensitive disk.
+# -ef because AGENTS.md and AGENTS.MD are one file on a case-insensitive disk, and
+# a candidate may be a symlink to the file another agent reads, whose block is not
+# this agent's to remove.
 agent_stale_instructions() {
-	local active path
+	local active path other
 	active=$(agent_instructions "$1")
 	while IFS= read -r path; do
-		[ "${path}" = "${active}" ] || [ "${path}" -ef "${active}" ] || printf '%s\n' "${path}"
+		[ "${path}" != "${active}" ] || continue
+		if [ -e "${path}" ]; then
+			[ ! "${path}" -ef "${active}" ] || continue
+			for other in ${agent_ids}; do
+				[ "${other}" != "$1" ] || continue
+				[ ! "${path}" -ef "$(agent_instructions "${other}")" ] || continue 2
+			done
+		fi
+		printf '%s\n' "${path}"
 	done < <(agent_stale_candidates "$1")
 }
 
@@ -478,7 +488,14 @@ preflight_instruction() {
 preflight_stale() {
 	local id="$1" label path state
 	label=$(agent_label "${id}")
+	# Which app created ~/.devin is unknown, so the older Windsurf may still be in
+	# use: its block stays until uninstall rather than move on install.
+	[ "${id}" != windsurf ] || return 0
 	while IFS= read -r path; do
+		if ! resolve_target "${path}" >/dev/null; then
+			preflight_blocked "${label}" "${path}" other "unresolvable symlink"
+			continue
+		fi
 		[ -f "${path}" ] || continue
 		state=$(block_state "${path}")
 		case "${state}" in
@@ -1317,7 +1334,6 @@ fi
 if agent_selected windsurf; then
 	found=1
 	install_block "$(agent_instructions windsurf)" "$(agent_label windsurf)" "$(agent_block windsurf)"
-	retire_stale windsurf
 fi
 if agent_selected grok; then
 	found=1

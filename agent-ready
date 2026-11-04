@@ -353,6 +353,7 @@ rollback() {
 			die "refusing to replace ${launcher}; it was not installed by agent-ready"
 	fi
 	printf 'Rolling back to agent-ready %s\n' "${target}"
+	trap restore_receipt EXIT
 	narrow_receipt "${target}"
 	receipt_agent_args
 	if ! bash "${versions_dir}/${target}/install.sh" --configure-only ${repeat_args[@]+"${repeat_args[@]}"}; then
@@ -562,6 +563,7 @@ apply_languages() {
 update_work=
 update_lock=
 cleanup_update() {
+	restore_receipt
 	[ -z "${update_work}" ] || rm -rf "${update_work}"
 	[ -z "${update_lock}" ] || rmdir "${update_lock}" 2>/dev/null || true
 }

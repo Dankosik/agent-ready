@@ -2047,7 +2047,11 @@ regression_install "${relocated_home}" --agent cline,windsurf --configure-only >
 rg -q '^Tool routing' "${relocated_home}/.cline/rules/agent-ready.md"
 rg -q '^Tool routing' "${relocated_home}/.devin/global_rules.md"
 has_no_block "${relocated_home}/.cline/data/settings/rules/agent-ready.md"
+# The older Windsurf may still be in use, so only uninstall removes its block.
+rg -qF 'agent-ready:start' "${relocated_home}/.codeium/windsurf/memories/global_rules.md"
+run_uninstall_checkout "${relocated_home}" >/dev/null 2>&1
 has_no_block "${relocated_home}/.codeium/windsurf/memories/global_rules.md"
+has_no_block "${relocated_home}/.devin/global_rules.md"
 
 # A machine with only the older Windsurf app stays on the file that app reads.
 old_windsurf_home="${work}/old-windsurf-home"
@@ -2070,6 +2074,31 @@ printf 'user pi override\n' >"${pi_move_home}/.pi/agent/AGENTS.override.md"
 regression_install "${pi_move_home}" --agent pi --configure-only >/dev/null 2>&1
 has_no_block "${pi_move_home}/.pi/agent/AGENTS.md"
 rg -q '^Tool routing' "${pi_move_home}/.pi/agent/AGENTS.override.md"
+
+# A stale candidate that is a symlink to another agent's file keeps that agent's
+# block; a candidate that cannot resolve stops the run before any write.
+shared_home="${work}/shared-home"
+mkdir -p "${shared_home}/.claude" "${shared_home}/.codex"
+printf 'user claude\n' >"${shared_home}/.claude/CLAUDE.md"
+ln -s "${shared_home}/.claude/CLAUDE.md" "${shared_home}/.codex/AGENTS.md"
+printf 'user override\n' >"${shared_home}/.codex/AGENTS.override.md"
+HOME="${shared_home}" XDG_CONFIG_HOME="${shared_home}/.config" CLAUDE_CONFIG_DIR="${shared_home}/.claude" \
+	CODEX_HOME="${shared_home}/.codex" PATH="${test_path}" \
+	"${root}/install.sh" --agent claude,codex --configure-only >/dev/null 2>&1
+[ "$(rg -cF 'agent-ready:start' "${shared_home}/.claude/CLAUDE.md")" -eq 1 ]
+[ "$(rg -cF 'agent-ready:start' "${shared_home}/.codex/AGENTS.override.md")" -eq 1 ]
+loop_home="${work}/loop-home"
+mkdir -p "${loop_home}/.codex"
+ln -s AGENTS.override.md "${loop_home}/.codex/AGENTS.override.md"
+if regression_install "${loop_home}" --agent codex --configure-only --dry-run >/dev/null 2>&1; then
+	printf 'dry run accepted a symlink loop as a stale candidate\n' >&2
+	exit 1
+fi
+if regression_install "${loop_home}" --agent codex --configure-only >/dev/null 2>&1; then
+	printf 'install accepted a symlink loop as a stale candidate\n' >&2
+	exit 1
+fi
+[ ! -e "${loop_home}/.codex/AGENTS.md" ]
 
 # Local edits in a block about to move stop the run before anything is written.
 pi_edit_home="${work}/pi-edit-home"
@@ -2222,6 +2251,11 @@ cat >"${rollback_old_tree}/install.sh" <<'EOF'
 if grep -q 'pi' "${HOME}/.config/agent-ready/receipt" || [ -e "${HOME}/old-release-fails" ]; then
 	exit 1
 fi
+# Ctrl-C reaches the whole foreground process group.
+if [ -e "${HOME}/old-release-interrupted" ]; then
+	kill -INT "${PPID}"
+	kill -INT "$$"
+fi
 printf '%s\n' "$*" >"${HOME}/old-release-args"
 EOF
 write_rollback_receipt() {
@@ -2249,6 +2283,11 @@ fi
 rm "${rollback_new_home}/old-release-fails"
 rg -qx 'agents=claude,pi' "${rollback_receipt}"
 [ ! -e "${rollback_new_home}/bin/agent-ready" ]
+touch "${rollback_new_home}/old-release-interrupted"
+run_rollback_new >/dev/null 2>&1 || true
+rm "${rollback_new_home}/old-release-interrupted"
+rg -qx 'agents=claude,pi' "${rollback_receipt}"
+[ "$(find "${rollback_new_home}/.config/agent-ready" -name 'receipt.*' | wc -l | tr -d ' ')" -eq 0 ]
 write_rollback_receipt claude,pi claude,pi
 run_rollback_new >/dev/null 2>&1
 [ "$(cat "${rollback_new_home}/old-release-args")" = '--configure-only --agent claude' ]
