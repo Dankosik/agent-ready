@@ -141,6 +141,71 @@ pi_instructions() {
 	printf '%s\n' "${dir}/AGENTS.md"
 }
 
+# Kilo loads the first of these that exists, even an empty one, so a new AGENTS.md
+# would silently hide ~/.claude/CLAUDE.md, whichever agent wrote that file. The
+# block goes in whichever file Kilo actually loads. A selected Claude Code is about
+# to create CLAUDE.md, so it counts as existing.
+kilo_claude_disabled() {
+	local value
+	for value in "${KILO_DISABLE_CLAUDE_CODE:-}" "${KILO_DISABLE_CLAUDE_CODE_PROMPT:-}"; do
+		case "${value}" in
+		1 | true | TRUE | True) return 0 ;;
+		esac
+	done
+	return 1
+}
+
+kilo_default_instructions() {
+	printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/kilo/AGENTS.md"
+}
+
+kilo_instructions() {
+	local default claude="${HOME}/.claude/CLAUDE.md" profile=
+	default=$(kilo_default_instructions)
+	[ -z "${KILO_CONFIG_DIR:-}" ] || profile="${KILO_CONFIG_DIR}/AGENTS.md"
+	if [ -n "${profile}" ] && [ -f "${profile}" ]; then
+		printf '%s\n' "${profile}"
+	elif [ -f "${default}" ]; then
+		printf '%s\n' "${default}"
+	elif ! kilo_claude_disabled && { [ -f "${claude}" ] || { agent_selected claude && [ -z "${CLAUDE_CONFIG_DIR:-}" ]; }; }; then
+		printf '%s\n' "${claude}"
+	else
+		printf '%s\n' "${profile:-${default}}"
+	fi
+}
+
+# A file with nothing but the block, or left empty by uninstall, still hides
+# CLAUDE.md. Whether to delete it is the user's call, so it is only pointed out.
+kilo_hiding_notice() {
+	local own claude="${HOME}/.claude/CLAUDE.md"
+	[ -f "${claude}" ] || return 0
+	! kilo_claude_disabled || return 0
+	own=$(kilo_instructions)
+	[ "${own}" != "${claude}" ] && [ -f "${own}" ] || return 0
+	[ ! "${own}" -ef "${claude}" ] || return 0
+	if awk -v s="${start}" -v e="${end}" '
+		$0 == s { skip = 1; next }
+		$0 == e { skip = 0; next }
+		!skip && NF { found = 1 }
+		END { exit !found }
+	' "${own}"; then
+		return 0
+	fi
+	printf 'Kilo Code: %s holds nothing of yours but hides %s from Kilo; delete it if Kilo should read that file\n' "${own}" "${claude}"
+}
+
+goose_default_instructions() {
+	printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/goose/AGENTS.md"
+}
+
+# goose ignores a GOOSE_PATH_ROOT that is not absolute.
+goose_instructions() {
+	case "${GOOSE_PATH_ROOT:-}" in
+	/*) printf '%s\n' "${GOOSE_PATH_ROOT}/config/AGENTS.md" ;;
+	*) goose_default_instructions ;;
+	esac
+}
+
 # Codex reads the first non-empty one of these, so an override hides AGENTS.md.
 codex_instructions() {
 	local dir="${CODEX_HOME:-${HOME}/.codex}"
@@ -165,17 +230,19 @@ agent_instructions() {
 	case "$1" in
 	claude) printf '%s\n' "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/CLAUDE.md" ;;
 	codex) codex_instructions ;;
-	# Antigravity shares Gemini CLI's global file.
-	gemini | antigravity) printf '%s\n' "${HOME}/.gemini/GEMINI.md" ;;
+	# Antigravity shares Gemini CLI's global file unless GEMINI_CLI_HOME moves
+	# Gemini's; only Gemini CLI is documented to honour that variable.
+	gemini) printf '%s\n' "${GEMINI_CLI_HOME:-${HOME}}/.gemini/GEMINI.md" ;;
+	antigravity) printf '%s\n' "${HOME}/.gemini/GEMINI.md" ;;
 	copilot) printf '%s\n' "${COPILOT_HOME:-${HOME}/.copilot}/copilot-instructions.md" ;;
 	windsurf) windsurf_instructions ;;
 	grok) printf '%s\n' "${GROK_HOME:-${HOME}/.grok}/rules/agent-ready.md" ;;
-	opencode) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" ;;
+	opencode) printf '%s\n' "${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/opencode}/AGENTS.md" ;;
 	qwen) printf '%s\n' "${QWEN_HOME:-${HOME}/.qwen}/QWEN.md" ;;
 	cline) printf '%s\n' "${CLINE_DIR:-${HOME}/.cline}/rules/agent-ready.md" ;;
-	kilo) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/kilo/AGENTS.md" ;;
-	crush) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/crush/CRUSH.md" ;;
-	goose) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/goose/AGENTS.md" ;;
+	kilo) kilo_instructions ;;
+	crush) printf '%s\n' "${CRUSH_GLOBAL_CONFIG:-${XDG_CONFIG_HOME:-${HOME}/.config}/crush}/CRUSH.md" ;;
+	goose) goose_instructions ;;
 	dsh) printf '%s\n' "${DSH_HOME:-${HOME}/.dsh}/AGENTS.md" ;;
 	pi) pi_instructions ;;
 	esac
@@ -192,6 +259,15 @@ agent_stale_candidates() {
 		;;
 	windsurf)
 		printf '%s\n' "${HOME}/.devin/global_rules.md" "${HOME}/.codeium/windsurf/memories/global_rules.md"
+		;;
+	# Where the block sat before one of these variables moved the agent's file.
+	opencode) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" ;;
+	crush) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/crush/CRUSH.md" ;;
+	goose) goose_default_instructions ;;
+	kilo)
+		kilo_default_instructions
+		[ -z "${KILO_CONFIG_DIR:-}" ] || printf '%s\n' "${KILO_CONFIG_DIR}/AGENTS.md"
+		printf '%s\n' "${HOME}/.claude/CLAUDE.md"
 		;;
 	# Before v1.5.1 the block went where Cline CLI never loaded it.
 	cline) printf '%s\n' "${CLINE_DATA_DIR:-${HOME}/.cline/data}/settings/rules/agent-ready.md" ;;
@@ -224,10 +300,26 @@ agent_stale_instructions() {
 }
 
 # `codegraph install` writes its own CodeGraph section into these four agents'
-# files, so their agent-ready block leaves out the Code graph line.
-agent_block() {
+# files, so their agent-ready block leaves out the Code graph line. It knows
+# neither GEMINI_CLI_HOME nor OPENCODE_CONFIG_DIR, so a file moved by one of those
+# never gets that section and keeps the line.
+agent_own_block() {
 	case "$1" in
-	claude | gemini | opencode) printf '%s\n' "${graph_routing}" ;;
+	claude) printf '%s\n' "${graph_routing}" ;;
+	gemini)
+		if [ -n "${GEMINI_CLI_HOME:-}" ]; then
+			printf '%s\n' "${routing}"
+		else
+			printf '%s\n' "${graph_routing}"
+		fi
+		;;
+	opencode)
+		if [ -n "${OPENCODE_CONFIG_DIR:-}" ]; then
+			printf '%s\n' "${routing}"
+		else
+			printf '%s\n' "${graph_routing}"
+		fi
+		;;
 	# CodeGraph writes its section to AGENTS.md, which an override hides.
 	codex)
 		case "$(codex_instructions)" in
@@ -247,6 +339,34 @@ agent_block() {
 		;;
 	*) printf '%s\n' "${routing}" ;;
 	esac
+}
+
+# Whether two paths are one file, also before that file exists.
+same_file() {
+	[ "$1" = "$2" ] || [ "$1" -ef "$2" ] ||
+		[ "$(resolve_target "$1" 2>/dev/null || true)" = "$(resolve_target "$2" 2>/dev/null || true)" ]
+}
+
+# A file can have one block, however many agents read it through a dotfiles
+# symlink, or the agents would overwrite each other on every run. CodeGraph's
+# section reaches the file through any one of them, so one is enough to drop the
+# Code graph line. Agents an earlier run configured count, so that configuring one
+# agent at a time settles on the same block.
+agent_block() {
+	local id="$1" own file other
+	own=$(agent_own_block "${id}")
+	if [ "${own}" != "${graph_routing}" ]; then
+		file=$(agent_instructions "${id}")
+		for other in ${selected_agents} ${prev_configured//,/ }; do
+			[ "${other}" != "${id}" ] && [ "${other}" != cursor ] || continue
+			same_file "${file}" "$(agent_instructions "${other}")" || continue
+			if [ "$(agent_own_block "${other}")" = "${graph_routing}" ]; then
+				own="${graph_routing}"
+				break
+			fi
+		done
+	fi
+	printf '%s\n' "${own}"
 }
 
 # On Linux the tools come from upstream release binaries unless Homebrew is
@@ -273,10 +393,28 @@ detect_qwen() { command -v qwen >/dev/null 2>&1; }
 detect_cline() { command -v cline >/dev/null 2>&1; }
 detect_kilo() { command -v kilo >/dev/null 2>&1; }
 detect_crush() { command -v crush >/dev/null 2>&1; }
-detect_goose() { command -v goose >/dev/null 2>&1; }
+# Unrelated tools own these two names: pressly's goose runs database migrations,
+# and dsh is also the distributed shell. Only those are ruled out, by what they
+# print, so an agent whose output changes is still detected.
+detect_goose() {
+	local out
+	command -v goose >/dev/null 2>&1 || return 1
+	out=$(goose --version 2>&1 </dev/null || true)
+	case "${out}" in
+	"goose version:"*) return 1 ;;
+	esac
+}
 # DeepSeek Harness is documented through npx, which leaves no dsh on PATH, so its
 # home directory counts too.
-detect_dsh() { command -v dsh >/dev/null 2>&1 || [ -d "${DSH_HOME:-${HOME}/.dsh}" ]; }
+detect_dsh() {
+	local out
+	[ ! -d "${DSH_HOME:-${HOME}/.dsh}" ] || return 0
+	command -v dsh >/dev/null 2>&1 || return 1
+	out=$(dsh --version 2>&1 </dev/null || true)
+	case "${out}" in
+	*[Dd]istributed*[Ss]hell* | *"ancer's shell"*) return 1 ;;
+	esac
+}
 detect_pi() { command -v pi >/dev/null 2>&1; }
 
 agent_ids="claude codex cursor gemini antigravity copilot windsurf grok opencode qwen cline kilo crush goose dsh pi"
@@ -520,8 +658,12 @@ preflight_stale() {
 	local id="$1" label path state target
 	label=$(agent_label "${id}")
 	# Which app created ~/.devin is unknown, so the older Windsurf may still be in
-	# use: its block stays until uninstall rather than move on install.
-	[ "${id}" != windsurf ] || return 0
+	# use: its block stays until uninstall rather than move on install. The same goes
+	# for a block left behind by a variable that may only select a profile, and for
+	# a CLAUDE.md that Kilo no longer loads but another agent may.
+	case "${id}" in
+	windsurf | opencode | kilo | crush | goose) return 0 ;;
+	esac
 	while IFS= read -r path; do
 		if ! target=$(resolve_target "${path}"); then
 			preflight_blocked "${label}" "${path}" other "unresolvable symlink"
@@ -552,10 +694,16 @@ retire_stale() {
 }
 
 preflight_cursor() {
-	local label="Cursor" cursor_dir="${HOME}/.cursor" requested legacy state=absent hooks response current=1
+	local label="Cursor" cursor_dir="${HOME}/.cursor" requested legacy state=absent hooks response current=1 problem
 	requested="${cursor_dir}/hooks.json"
 	legacy="${cursor_dir}/AGENTS.md"
 	response="${cursor_dir}/hooks/agent-ready-session-start.json"
+	# Only a response that has to change needs a writable path.
+	if ! { command -v jq >/dev/null 2>&1 && [ -f "${response}" ] &&
+		cmp -s "${response}" <(jq -Rs '{additional_context: .}' "${routing}"); }; then
+		problem=$(path_problem "${response}")
+		[ -z "${problem}" ] || preflight_blocked "${label}" "${response}" other "${problem}"
+	fi
 	if [ -f "${legacy}" ]; then
 		state=$(block_state "${legacy}")
 		case "${state}" in
@@ -748,7 +896,7 @@ configure_rtk_optional() {
 }
 
 install_cursor_hook() {
-	local cursor_dir="${HOME}/.cursor" response hooks requested tmp command
+	local cursor_dir="${HOME}/.cursor" response hooks requested tmp command merged
 	command -v jq >/dev/null 2>&1 || {
 		printf 'Cursor: jq is required to merge hooks.json\n' >&2
 		return 1
@@ -756,22 +904,18 @@ install_cursor_hook() {
 	mkdir -p "${cursor_dir}/hooks"
 
 	response="${cursor_dir}/hooks/agent-ready-session-start.json"
-	tmp=$(mktemp "${response}.XXXXXX") || return 1
-	jq -Rs '{additional_context: .}' "${routing}" >"${tmp}"
-	if [ -f "${response}" ] && cmp -s "${response}" "${tmp}"; then
-		rm -f "${tmp}"
-	else
+	# Compared before any write, so a read-only path needing no change is fine.
+	if ! { [ -f "${response}" ] && cmp -s "${response}" <(jq -Rs '{additional_context: .}' "${routing}"); }; then
+		tmp=$(mktemp "${response}.XXXXXX") || return 1
+		jq -Rs '{additional_context: .}' "${routing}" >"${tmp}"
 		mv "${tmp}" "${response}"
 	fi
 
 	requested="${cursor_dir}/hooks.json"
 	hooks=$(resolve_target "${requested}")
-	mkdir -p "$(dirname -- "${hooks}")"
-	tmp=$(mktemp "${hooks}.XXXXXX") || return 1
 	command='cat ./hooks/agent-ready-session-start.json'
 	if [ -f "${hooks}" ]; then
-		cp -p "${hooks}" "${tmp}"
-		jq --arg command "${command}" '
+		merged=$(jq --arg command "${command}" '
 			if type != "object" then error("hooks.json root must be an object") else . end
 			| .hooks = (.hooks // {})
 			| if ((.hooks.sessionStart // []) | type) != "array"
@@ -780,17 +924,23 @@ install_cursor_hook() {
 			| .hooks.sessionStart = ([.hooks.sessionStart[]?
 				| select((type != "object") or (.command != $command))]
 				+ [{"command": $command}])
-		' "${hooks}" >"${tmp}" || {
+		' "${hooks}") || return 1
+	else
+		merged=$(jq -n --arg command "${command}" '{version: 1, hooks: {sessionStart: [{command: $command}]}}') || return 1
+	fi
+	if [ -f "${hooks}" ] && [ "${merged}" = "$(cat "${hooks}")" ]; then
+		printf 'Cursor: routing hook already configured in %s\n' "${requested}"
+	else
+		mkdir -p "$(dirname -- "${hooks}")"
+		tmp=$(mktemp "${hooks}.XXXXXX") || return 1
+		if [ -f "${hooks}" ] && ! cp -p "${hooks}" "${tmp}"; then
+			rm -f "${tmp}"
+			return 1
+		fi
+		printf '%s\n' "${merged}" >"${tmp}" || {
 			rm -f "${tmp}"
 			return 1
 		}
-	else
-		jq -n --arg command "${command}" '{version: 1, hooks: {sessionStart: [{command: $command}]}}' >"${tmp}"
-	fi
-	if [ -f "${hooks}" ] && cmp -s "${hooks}" "${tmp}"; then
-		rm -f "${tmp}"
-		printf 'Cursor: routing hook already configured in %s\n' "${requested}"
-	else
 		mv "${tmp}" "${hooks}"
 		printf 'Cursor: configured routing hook in %s\n' "${requested}"
 	fi
@@ -801,7 +951,15 @@ install_cursor_hook() {
 # CodeGraph's installer knows each agent's MCP config shape, including
 # OpenCode 2's `mcp.servers` migration, so the wiring is delegated to it rather
 # than reimplemented here. --no-permissions keeps it out of the agent's
-# auto-allow list, and telemetry is turned off afterwards.
+# auto-allow list. The installer reports its own run, so telemetry is off for that
+# run through the environment and then off for good through the saved choice.
+codegraph_target() {
+	case "$1" in
+	claude | codex | cursor | opencode | gemini | antigravity) printf '%s\n' "$1" ;;
+	copilot) printf 'copilot-cli\n' ;;
+	esac
+}
+
 configure_codegraph() {
 	local id target targets=
 	command -v codegraph >/dev/null 2>&1 || return 0
@@ -809,19 +967,16 @@ configure_codegraph() {
 		targets=auto
 	else
 		for id in ${selected_agents}; do
-			case "${id}" in
-			claude | codex | cursor | opencode | gemini | antigravity) target="${id}" ;;
-			copilot) target=copilot-cli ;;
-			*)
+			target=$(codegraph_target "${id}")
+			if [ -n "${target}" ]; then
+				targets="${targets}${targets:+,}${target}"
+			else
 				printf 'CodeGraph: MCP setup is not available for %s; the CLI routing still applies\n' "${id}" >&2
-				target=
-				;;
-			esac
-			[ -z "${target}" ] || targets="${targets}${targets:+,}${target}"
+			fi
 		done
 	fi
 	if [ -n "${targets}" ]; then
-		codegraph install --yes --target="${targets}" --location=global --no-permissions ||
+		CODEGRAPH_TELEMETRY=0 codegraph install --yes --target="${targets}" --location=global --no-permissions ||
 			printf 'CodeGraph: MCP setup failed; run codegraph install manually\n' >&2
 	fi
 	codegraph telemetry off >/dev/null 2>&1 ||
@@ -891,8 +1046,9 @@ uninstall_collect_agents() {
 			continue
 		fi
 		# Gemini and Antigravity share one file: markers there name one agent,
-		# Antigravity only when the receipt says it alone configured the file.
-		[ "${id}" != antigravity ] || continue
+		# Antigravity only when the receipt says it alone configured the file, or
+		# when GEMINI_CLI_HOME has moved Gemini's file away from it.
+		[ "${id}" != antigravity ] || [ -n "${GEMINI_CLI_HOME:-}" ] || continue
 		if [ "${id}" = gemini ] && [ "${uninstall_receipt_present}" -eq 1 ]; then
 			case ",${receipt_configured}," in
 			*,antigravity,*) continue ;;
@@ -996,7 +1152,7 @@ uninstall_preflight_cursor() {
 	fi
 	response="${cursor_dir}/hooks/agent-ready-session-start.json"
 	if [ -f "${response}" ] || [ -L "${response}" ]; then
-		preflight_report "Cursor" "would remove" "${response}"
+		preflight_write "Cursor" "would remove" "${response}" "${response}"
 	fi
 }
 
@@ -1120,15 +1276,17 @@ uninstall_state() {
 }
 
 uninstall_tools_hint() {
-	local mode tool bin formula names='' paths='' bundle gemini_file
+	local mode bin formula names='' paths='' bundle gemini_file formulae='' target targets=''
 	mode="${receipt_tools:-$(receipt_legacy_tools)}"
 	if [ "${mode}" = brew ]; then
-		for tool in rtk:rtk rg:ripgrep ast-grep:ast-grep sd:sd uv:uv jq:jq yq:yq mdq:mdq \
-			gh:gh wt:worktrunk difft:difftastic gitleaks:gitleaks actionlint:actionlint \
-			shellcheck:shellcheck hyperfine:hyperfine osv-scanner:osv-scanner gtimeout:coreutils gopls:gopls; do
-			bin="${tool%%:*}"
-			formula="${tool#*:}"
-			command -v "${bin}" >/dev/null 2>&1 || continue
+		# A tool on PATH may not come from Homebrew, and one unknown name makes
+		# brew uninstall refuse the whole list.
+		if command -v brew >/dev/null 2>&1; then
+			formulae=$(brew list --formula -1 2>/dev/null || true)
+		fi
+		for formula in rtk ripgrep ast-grep sd uv jq yq mdq gh worktrunk difftastic gitleaks \
+			actionlint shellcheck hyperfine osv-scanner coreutils gopls; do
+			printf '%s\n' "${formulae}" | grep -qFx "${formula}" || continue
 			names="${names}${names:+ }${formula}"
 		done
 		if [ -n "${names}" ]; then
@@ -1181,7 +1339,13 @@ uninstall_tools_hint() {
 			;;
 		esac
 	done
-	printf '  CodeGraph MCP wiring: codegraph uninstall --location global --keep-cli --target <agents>\n'
+	for id in ${uninstall_agents}; do
+		target=$(codegraph_target "${id}")
+		[ -z "${target}" ] || targets="${targets}${targets:+,}${target}"
+	done
+	if [ -n "${targets}" ]; then
+		printf '  CodeGraph MCP wiring: codegraph uninstall --location global --keep-cli --target %s\n' "${targets}"
+	fi
 	if [ "${uninstall_go}" -eq 1 ]; then
 		for id in ${uninstall_agents}; do
 			case "${id}" in
@@ -1230,6 +1394,7 @@ uninstall_main() {
 	done
 	uninstall_state
 	uninstall_tools_hint
+	kilo_hiding_notice
 }
 
 if [ "${uninstall}" -eq 1 ]; then
@@ -1297,6 +1462,29 @@ if [ -f "${receipt_file}" ]; then
 	prev_agents="${receipt_agents}"
 	prev_configured="${receipt_configured}"
 	prev_tools="${receipt_tools}"
+fi
+
+# An automatic run repeats what detection finds, but an agent added with --agent
+# may not be detectable, and its block would never be refreshed. One the receipt
+# names keeps being configured while its block is still there.
+agent_has_block() {
+	local file state
+	if [ "$1" = cursor ]; then
+		uninstall_cursor_present
+		return
+	fi
+	file=$(agent_instructions "$1")
+	[ -f "${file}" ] || return 1
+	state=$(block_state "${file}") || state=invalid
+	[ "${state}" != absent ]
+}
+
+if [ "${auto_detection}" -eq 1 ]; then
+	for id in ${prev_configured//,/ }; do
+		if ! agent_selected "${id}" && agent_has_block "${id}"; then
+			selected_agents="${selected_agents} ${id}"
+		fi
+	done
 fi
 
 preflight_all
@@ -1435,6 +1623,7 @@ fi
 if agent_selected kilo; then
 	found=1
 	install_block "$(agent_instructions kilo)" "$(agent_label kilo)" "$(agent_block kilo)"
+	kilo_hiding_notice
 fi
 if agent_selected crush; then
 	found=1

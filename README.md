@@ -180,17 +180,17 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstr
 | Claude Code | `claude` | `~/.claude/CLAUDE.md` |
 | Codex | `codex` | `~/.codex/AGENTS.md`, or a non-empty `AGENTS.override.md` there |
 | Cursor | `cursor` | global hook in `~/.cursor/hooks.json` |
-| Gemini CLI | `gemini` | `~/.gemini/GEMINI.md` |
+| Gemini CLI | `gemini` | `~/.gemini/GEMINI.md` (under `GEMINI_CLI_HOME` when set) |
 | Google Antigravity | `antigravity` | `~/.gemini/GEMINI.md` (shared with Gemini CLI) |
 | GitHub Copilot CLI | `copilot` | `~/.copilot/copilot-instructions.md` |
 | Windsurf / Devin Desktop | `windsurf` | `~/.devin/global_rules.md`, or `~/.codeium/windsurf/memories/global_rules.md` on a machine with only the older app's data |
 | Grok Build | `grok` | `~/.grok/rules/agent-ready.md` |
-| OpenCode | `opencode` | `~/.config/opencode/AGENTS.md` |
+| OpenCode | `opencode` | `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` when set) |
 | Qwen Code | `qwen` | `~/.qwen/QWEN.md` |
 | Cline CLI | `cline` | `~/.cline/rules/agent-ready.md` |
-| Kilo Code | `kilo` | `~/.config/kilo/AGENTS.md` |
-| Crush | `crush` | `~/.config/crush/CRUSH.md` |
-| goose | `goose` | `~/.config/goose/AGENTS.md` |
+| Kilo Code | `kilo` | `~/.config/kilo/AGENTS.md` (`KILO_CONFIG_DIR` when set), or `~/.claude/CLAUDE.md` when Kilo already loads that |
+| Crush | `crush` | `~/.config/crush/CRUSH.md` (`CRUSH_GLOBAL_CONFIG` when set) |
+| goose | `goose` | `~/.config/goose/AGENTS.md` (`GOOSE_PATH_ROOT/config` when set) |
 | DeepSeek Harness | `dsh` | `~/.dsh/AGENTS.md` |
 | Pi | `pi` | `~/.pi/agent/AGENTS.md`, or the context file Pi already loads there |
 
@@ -200,7 +200,10 @@ instructions. Kilo Code is configured separately because its OpenCode-based CLI
 uses its own config directory. DeepSeek Harness runs through `npx`, so it is also
 detected by its `~/.dsh` directory. Pi loads only the first context file it finds
 in its agent directory, so the block joins an existing `AGENTS.override.md` or
-`CLAUDE.md` rather than hide it behind a new `AGENTS.md`. Codex likewise reads a
+`CLAUDE.md` rather than hide it behind a new `AGENTS.md`. Kilo Code loads the
+first of its `AGENTS.md` and `~/.claude/CLAUDE.md` that exists, so the block joins
+that `CLAUDE.md` for the same reason, and the installer points out a Kilo file that
+holds nothing of yours but still hides it. Codex likewise reads a
 non-empty `AGENTS.override.md` instead of `AGENTS.md`. When the file an agent
 loads changes, the next run moves the block there, and uninstall removes a block
 from either file. A block in the older Windsurf file stays until uninstall,
@@ -281,8 +284,8 @@ a self-contained bundle:
 - `--upgrade` updates that copy and prunes older versions; a `codegraph`
   installed with npm or upstream's script is not replaced (MCP wiring and
   telemetry still apply);
-- the installer turns anonymous usage telemetry off after wiring. Re-enable it
-  with `codegraph telemetry on`.
+- anonymous usage telemetry stays off during the wiring and is then turned off
+  for good, so nothing is reported. Re-enable it with `codegraph telemetry on`.
 
 MCP wiring is delegated to CodeGraph's own installer, which knows each agent's
 config shape. Automatic installation passes `--target=auto`, so CodeGraph wires

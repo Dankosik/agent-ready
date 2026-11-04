@@ -72,9 +72,10 @@ EOF
 textual=$(grep -rho '\.Get(' "${work}" --include='*.go' | wc -l | tr -d ' ')
 line=$(grep -n 'func (s \*Store) Get' "${work}/users/users.go" | cut -d: -f1)
 col=$(awk -v l="${line}" 'NR == l { print index($0, "Get(") }' "${work}/users/users.go")
-semantic=$(cd "${work}" && gopls references "users/users.go:${line}:${col}" 2>/dev/null | grep -c '\.go:' || true)
+references=$(cd "${work}" && gopls references "users/users.go:${line}:${col}" 2>&1 || true)
+semantic=$(grep -c '\.go:' <<<"${references}" || true)
 [ "${semantic}" -eq 2 ] || {
-	printf 'gopls found %s references to (*Store).Get, expected 2\n' "${semantic}" >&2
+	printf 'gopls found %s references to (*Store).Get, expected 2:\n%s\n' "${semantic}" "${references}" >&2
 	exit 1
 }
 printf 'renaming (*Store).Get: grep sees %s .Get( calls, gopls finds the %s real callers\n' "${textual}" "${semantic}"

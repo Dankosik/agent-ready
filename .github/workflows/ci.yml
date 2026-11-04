@@ -51,6 +51,12 @@ jobs:
         run: |
           ./test-install.sh
           ./verify.sh
+      # gopls needs the go command to load a module, and macOS runners have none.
+      - name: Verify Go support
+        run: |
+          command -v go >/dev/null 2>&1 || brew install go
+          ./languages/go/install.sh --configure-only
+          ./languages/go/verify.sh
 
   binaries:
     strategy:
