@@ -4,6 +4,12 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "$0")" && pwd)
 
+# Assigned by lib/receipt.sh when a receipt is read.
+receipt_agents=
+# shellcheck source=lib/receipt.sh
+# shellcheck disable=SC1091
+. "${root}/../../lib/receipt.sh"
+
 agent=auto
 install_tools=1
 upgrade_tools=0
@@ -45,6 +51,42 @@ case "${agent}" in
 auto | claude | codex | cursor) ;;
 *) usage; exit 2 ;;
 esac
+
+# Without --agent, an install that named its agents stays with those agents; only
+# an automatic install keeps detecting. A stale receipt stops the run first.
+receipt_file=$(receipt_path)
+if [ -f "${receipt_file}" ]; then
+	receipt_read "${receipt_file}" || exit 1
+fi
+[ "${receipt_agents}" != auto ] || receipt_agents=
+auto_selected() {
+	[ "${agent}" = auto ] || return 1
+	case ",${receipt_agents:-$1}," in
+	*",$1,"*) return 0 ;;
+	esac
+	return 1
+}
+
+# Follows a dotfiles symlink, so the atomic move replaces the file it points at.
+resolve_target() {
+	local path="$1" link dir hops=0
+	while [ -L "${path}" ]; do
+		hops=$((hops + 1))
+		[ "${hops}" -le 20 ] || {
+			printf 'too many symlinks while resolving %s\n' "$1" >&2
+			return 1
+		}
+		link=$(readlink "${path}")
+		case "${link}" in
+		/*) path="${link}" ;;
+		*)
+			dir=$(cd -- "$(dirname -- "${path}")" && pwd -P)
+			path="${dir}/${link}"
+			;;
+		esac
+	done
+	printf '%s\n' "${path}"
+}
 
 # gopls publishes no release binaries; without Homebrew on Linux it is built
 # with the Go toolchain the user already has, into the same directory as the
@@ -90,8 +132,8 @@ gopls mcp -instructions >/dev/null 2>&1 || {
 found=0
 cursor_config=
 
-if [ "${agent}" = cursor ] || { [ "${agent}" = auto ] && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1; }; }; then
-	cursor_config="${HOME}/.cursor/mcp.json"
+if [ "${agent}" = cursor ] || { auto_selected cursor && { command -v cursor >/dev/null 2>&1 || command -v cursor-agent >/dev/null 2>&1; }; }; then
+	cursor_config=$(resolve_target "${HOME}/.cursor/mcp.json")
 	command -v jq >/dev/null 2>&1 || {
 		printf 'Cursor: jq is required to merge mcp.json\n' >&2
 		exit 1
@@ -106,7 +148,7 @@ if [ "${agent}" = codex ] && ! command -v codex >/dev/null 2>&1; then
 	printf 'codex is required for --agent codex\n' >&2
 	exit 1
 fi
-if [ "${agent}" = codex ] || { [ "${agent}" = auto ] && command -v codex >/dev/null 2>&1; }; then
+if [ "${agent}" = codex ] || { auto_selected codex && command -v codex >/dev/null 2>&1; }; then
 	found=1
 	if codex mcp get gopls --json >/dev/null 2>&1; then
 		printf 'Codex: kept existing gopls MCP\n'
@@ -120,7 +162,7 @@ if [ "${agent}" = claude ] && ! command -v claude >/dev/null 2>&1; then
 	printf 'claude is required for --agent claude\n' >&2
 	exit 1
 fi
-if [ "${agent}" = claude ] || { [ "${agent}" = auto ] && command -v claude >/dev/null 2>&1; }; then
+if [ "${agent}" = claude ] || { auto_selected claude && command -v claude >/dev/null 2>&1; }; then
 	found=1
 	if claude mcp get gopls >/dev/null 2>&1; then
 		printf 'Claude Code: kept existing gopls MCP\n'
@@ -138,6 +180,7 @@ if [ -n "${cursor_config}" ]; then
 		mkdir -p "$(dirname -- "${cursor_config}")"
 		cursor_tmp=$(mktemp "${cursor_config}.XXXXXX")
 		if [ -f "${cursor_config}" ]; then
+			cp -p "${cursor_config}" "${cursor_tmp}"
 			jq '
 				.mcpServers = (.mcpServers // {})
 				| if (.mcpServers | type) != "object" then error("mcpServers must be an object") else . end
@@ -149,7 +192,6 @@ if [ -n "${cursor_config}" ]; then
 		else
 			jq -n '{mcpServers:{gopls:{command:"gopls",args:["mcp"]}}}' >"${cursor_tmp}"
 		fi
-		chmod 600 "${cursor_tmp}"
 		mv "${cursor_tmp}" "${cursor_config}"
 		printf 'Cursor: configured gopls MCP\n'
 	fi
@@ -159,7 +201,9 @@ agent_ready_config="${XDG_CONFIG_HOME:-${HOME}/.config}/agent-ready"
 mkdir -p "${agent_ready_config}/languages"
 printf 'enabled\n' >"${agent_ready_config}/languages/go"
 if command -v rtk >/dev/null 2>&1; then
-	if [ "${agent}" = auto ]; then
+	if [ "${agent}" = auto ] && [ -n "${receipt_agents}" ]; then
+		"${root}/../../install.sh" --agent "${receipt_agents}" --configure-only
+	elif [ "${agent}" = auto ]; then
 		"${root}/../../install.sh" --configure-only
 	else
 		"${root}/../../install.sh" --agent "${agent}" --configure-only
@@ -168,6 +212,8 @@ else
 	printf 'Go routing will be applied after the base agent-ready installer runs\n'
 fi
 
-if [ "${found}" -eq 0 ]; then
+if [ "${found}" -eq 0 ] && [ -n "${receipt_agents}" ]; then
+	printf 'Go: gopls MCP setup is available for Claude Code, Codex, and Cursor only; the Go routing still applies\n'
+elif [ "${found}" -eq 0 ]; then
 	printf 'No supported harness found; rerun %s --configure-only after installing one\n' "$0"
 fi

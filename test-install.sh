@@ -4,7 +4,7 @@ set -euo pipefail
 
 # These point the installer at agent configuration; a developer's own values must
 # not route a test at real files.
-unset DSH_HOME PI_CODING_AGENT_DIR
+unset DSH_HOME PI_CODING_AGENT_DIR CLINE_DIR CLINE_DATA_DIR
 
 root=$(cd -- "$(dirname -- "$0")" && pwd)
 work=$(mktemp -d)
@@ -57,7 +57,7 @@ mkdir -p \
 	"${fake_home}/.cursor" \
 	"${fake_home}/grok-home/rules" \
 	"${fake_home}/qwen-home" \
-	"${fake_home}/cline-data/settings/rules" \
+	"${fake_home}/cline-home/rules" \
 	"${fake_home}/.config/opencode" \
 	"${fake_home}/.config/kilo" \
 	"${fake_home}/.config/crush" \
@@ -73,7 +73,7 @@ printf 'user copilot\n' >"${fake_home}/.copilot/copilot-instructions.md"
 printf 'user grok\n' >"${fake_home}/grok-home/rules/agent-ready.md"
 printf 'user opencode\n' >"${fake_home}/.config/opencode/AGENTS.md"
 printf 'user qwen\n' >"${fake_home}/qwen-home/QWEN.md"
-printf 'user cline\n' >"${fake_home}/cline-data/settings/rules/agent-ready.md"
+printf 'user cline\n' >"${fake_home}/cline-home/rules/agent-ready.md"
 printf 'user kilo\n' >"${fake_home}/.config/kilo/AGENTS.md"
 printf 'user crush\n' >"${fake_home}/.config/crush/CRUSH.md"
 printf 'user goose\n' >"${fake_home}/.config/goose/AGENTS.md"
@@ -103,11 +103,11 @@ install_targets=(
 	"${fake_home}/.codex/AGENTS.md"
 	"${fake_home}/.gemini/GEMINI.md"
 	"${fake_home}/.copilot/copilot-instructions.md"
-	"${fake_home}/.codeium/windsurf/memories/global_rules.md"
+	"${fake_home}/.devin/global_rules.md"
 	"${fake_home}/grok-home/rules/agent-ready.md"
 	"${fake_home}/.config/opencode/AGENTS.md"
 	"${fake_home}/qwen-home/QWEN.md"
-	"${fake_home}/cline-data/settings/rules/agent-ready.md"
+	"${fake_home}/cline-home/rules/agent-ready.md"
 	"${fake_home}/.config/kilo/AGENTS.md"
 	"${fake_home}/.config/crush/CRUSH.md"
 	"${fake_home}/.config/goose/AGENTS.md"
@@ -170,7 +170,7 @@ run_install() {
 	COPILOT_HOME="${fake_home}/.copilot" \
 	GROK_HOME="${fake_home}/grok-home" \
 	QWEN_HOME="${fake_home}/qwen-home" \
-	CLINE_DATA_DIR="${fake_home}/cline-data" \
+	CLINE_DIR="${fake_home}/cline-home" \
 		"${root}/install.sh" --configure-only "$@" >/dev/null
 }
 
@@ -192,11 +192,11 @@ for target in \
 	"${fake_home}/.codex/AGENTS.md" \
 	"${fake_home}/.gemini/GEMINI.md" \
 	"${fake_home}/.copilot/copilot-instructions.md" \
-	"${fake_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${fake_home}/.devin/global_rules.md" \
 	"${fake_home}/grok-home/rules/agent-ready.md" \
 	"${fake_home}/.config/opencode/AGENTS.md" \
 	"${fake_home}/qwen-home/QWEN.md" \
-	"${fake_home}/cline-data/settings/rules/agent-ready.md" \
+	"${fake_home}/cline-home/rules/agent-ready.md" \
 	"${fake_home}/.config/kilo/AGENTS.md" \
 	"${fake_home}/.config/crush/CRUSH.md" \
 	"${fake_home}/.config/goose/AGENTS.md" \
@@ -262,7 +262,7 @@ rg -q '^user copilot$' "${fake_home}/.copilot/copilot-instructions.md"
 rg -q '^user grok$' "${fake_home}/grok-home/rules/agent-ready.md"
 rg -q '^user opencode$' "${fake_home}/.config/opencode/AGENTS.md"
 rg -q '^user qwen$' "${fake_home}/qwen-home/QWEN.md"
-rg -q '^user cline$' "${fake_home}/cline-data/settings/rules/agent-ready.md"
+rg -q '^user cline$' "${fake_home}/cline-home/rules/agent-ready.md"
 rg -q '^user kilo$' "${fake_home}/.config/kilo/AGENTS.md"
 rg -q '^user crush$' "${fake_home}/.config/crush/CRUSH.md"
 rg -q '^user goose$' "${fake_home}/.config/goose/AGENTS.md"
@@ -292,11 +292,11 @@ for target in \
 	"${fake_home}/.codex/AGENTS.md" \
 	"${fake_home}/.gemini/GEMINI.md" \
 	"${fake_home}/.copilot/copilot-instructions.md" \
-	"${fake_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${fake_home}/.devin/global_rules.md" \
 	"${fake_home}/grok-home/rules/agent-ready.md" \
 	"${fake_home}/.config/opencode/AGENTS.md" \
 	"${fake_home}/qwen-home/QWEN.md" \
-	"${fake_home}/cline-data/settings/rules/agent-ready.md" \
+	"${fake_home}/cline-home/rules/agent-ready.md" \
 	"${fake_home}/.config/kilo/AGENTS.md" \
 	"${fake_home}/.config/crush/CRUSH.md" \
 	"${fake_home}/.config/goose/AGENTS.md"; do
@@ -311,7 +311,7 @@ check_headers
 dry_repeat=$(HOME="${fake_home}" XDG_CONFIG_HOME="${fake_home}/.config" PATH="${test_path}" \
 	CLAUDE_CONFIG_DIR="${fake_home}/.claude" CODEX_HOME="${fake_home}/.codex" \
 	COPILOT_HOME="${fake_home}/.copilot" GROK_HOME="${fake_home}/grok-home" \
-	QWEN_HOME="${fake_home}/qwen-home" CLINE_DATA_DIR="${fake_home}/cline-data" \
+	QWEN_HOME="${fake_home}/qwen-home" CLINE_DIR="${fake_home}/cline-home" \
 	"${root}/install.sh" --configure-only --dry-run)
 rg -q '^Codex: unchanged ' <<<"${dry_repeat}"
 rg -q '^Cursor: unchanged ' <<<"${dry_repeat}"
@@ -402,11 +402,11 @@ for untouched in \
 	"${targeted_home}/.cursor/hooks.json" \
 	"${targeted_home}/.gemini/GEMINI.md" \
 	"${targeted_home}/.copilot/copilot-instructions.md" \
-	"${targeted_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${targeted_home}/.devin/global_rules.md" \
 	"${targeted_home}/.grok/rules/agent-ready.md" \
 	"${targeted_home}/.config/opencode/AGENTS.md" \
 	"${targeted_home}/.qwen/QWEN.md" \
-	"${targeted_home}/.cline/data/settings/rules/agent-ready.md" \
+	"${targeted_home}/.cline/rules/agent-ready.md" \
 	"${targeted_home}/.config/kilo/AGENTS.md" \
 	"${targeted_home}/.config/crush/CRUSH.md" \
 	"${targeted_home}/.config/goose/AGENTS.md"; do
@@ -450,7 +450,7 @@ if rg -q '^install ' "${targeted_windsurf_home}/codegraph-calls"; then
 	exit 1
 fi
 rg -qx 'telemetry off' "${targeted_windsurf_home}/codegraph-calls"
-rg -qF 'Code graph: index of symbols, calls, imports' "${targeted_windsurf_home}/.codeium/windsurf/memories/global_rules.md"
+rg -qF 'Code graph: index of symbols, calls, imports' "${targeted_windsurf_home}/.devin/global_rules.md"
 
 language_home="${work}/language-home"
 mkdir -p "${language_home}/.cursor"
@@ -468,11 +468,11 @@ for target in \
 	"${language_home}/.codex/AGENTS.md" \
 	"${language_home}/.gemini/GEMINI.md" \
 	"${language_home}/.copilot/copilot-instructions.md" \
-	"${language_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${language_home}/.devin/global_rules.md" \
 	"${language_home}/.grok/rules/agent-ready.md" \
 	"${language_home}/.config/opencode/AGENTS.md" \
 	"${language_home}/.qwen/QWEN.md" \
-	"${language_home}/.cline/data/settings/rules/agent-ready.md" \
+	"${language_home}/.cline/rules/agent-ready.md" \
 	"${language_home}/.config/kilo/AGENTS.md" \
 	"${language_home}/.config/crush/CRUSH.md" \
 	"${language_home}/.config/goose/AGENTS.md"; do
@@ -1311,11 +1311,11 @@ rg -qxF 'install --yes --target=claude,codex --location=global --no-permissions'
 for untouched in \
 	"${multi_home}/.gemini/GEMINI.md" \
 	"${multi_home}/.copilot/copilot-instructions.md" \
-	"${multi_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${multi_home}/.devin/global_rules.md" \
 	"${multi_home}/.grok/rules/agent-ready.md" \
 	"${multi_home}/.config/opencode/AGENTS.md" \
 	"${multi_home}/.qwen/QWEN.md" \
-	"${multi_home}/.cline/data/settings/rules/agent-ready.md" \
+	"${multi_home}/.cline/rules/agent-ready.md" \
 	"${multi_home}/.config/kilo/AGENTS.md" \
 	"${multi_home}/.config/crush/CRUSH.md" \
 	"${multi_home}/.config/goose/AGENTS.md" \
@@ -1336,7 +1336,7 @@ rg -qxF 'install --yes --target=claude,copilot-cli --location=global --no-permis
 rg -qF 'MCP setup is not available for windsurf' "${work}/alias.out"
 rg -q '^Tool routing \(use instead of defaults\):$' "${alias_home}/.claude/CLAUDE.md"
 rg -q '^Tool routing \(use instead of defaults\):$' "${alias_home}/.copilot/copilot-instructions.md"
-rg -q '^Tool routing \(use instead of defaults\):$' "${alias_home}/.codeium/windsurf/memories/global_rules.md"
+rg -q '^Tool routing \(use instead of defaults\):$' "${alias_home}/.devin/global_rules.md"
 
 # auto cannot join a list, and an empty item is not an agent.
 for bad_agents in claude,auto claude,,codex; do
@@ -1496,11 +1496,11 @@ for untouched in \
 	"${update_home}/.claude/CLAUDE.md" \
 	"${update_home}/.gemini/GEMINI.md" \
 	"${update_home}/.copilot/copilot-instructions.md" \
-	"${update_home}/.codeium/windsurf/memories/global_rules.md" \
+	"${update_home}/.devin/global_rules.md" \
 	"${update_home}/.grok/rules/agent-ready.md" \
 	"${update_home}/.config/opencode/AGENTS.md" \
 	"${update_home}/.qwen/QWEN.md" \
-	"${update_home}/.cline/data/settings/rules/agent-ready.md" \
+	"${update_home}/.cline/rules/agent-ready.md" \
 	"${update_home}/.config/kilo/AGENTS.md" \
 	"${update_home}/.config/crush/CRUSH.md" \
 	"${update_home}/.config/goose/AGENTS.md" \
@@ -1672,7 +1672,7 @@ run_uninstall_checkout() {
 		COPILOT_HOME="${home}/.copilot" \
 		GROK_HOME="${home}/.grok" \
 		QWEN_HOME="${home}/.qwen" \
-		CLINE_DATA_DIR="${home}/.cline/data" \
+		CLINE_DIR="${home}/.cline" \
 		PATH="${test_path}" \
 		"${root}/install.sh" --uninstall "$@"
 }
@@ -1684,7 +1684,7 @@ uninstall_originals="${work}/uninstall-originals"
 mkdir -p "${uninstall_originals}" "${uninstall_home}/.claude" "${uninstall_home}/dotfiles" \
 	"${uninstall_home}/.codex" "${uninstall_home}/.gemini" "${uninstall_home}/.copilot" \
 	"${uninstall_home}/.grok/rules" "${uninstall_home}/.config/opencode" \
-	"${uninstall_home}/.qwen" "${uninstall_home}/.cline/data/settings/rules" \
+	"${uninstall_home}/.qwen" "${uninstall_home}/.cline/rules" \
 	"${uninstall_home}/.config/kilo" "${uninstall_home}/.config/crush" \
 	"${uninstall_home}/.config/goose" "${uninstall_home}/.cursor" \
 	"${uninstall_home}/.dsh" "${uninstall_home}/.pi/agent" \
@@ -1697,7 +1697,7 @@ printf 'user copilot\n' >"${uninstall_home}/.copilot/copilot-instructions.md"
 printf 'user grok\n' >"${uninstall_home}/.grok/rules/agent-ready.md"
 printf 'user opencode\n' >"${uninstall_home}/.config/opencode/AGENTS.md"
 printf 'user qwen\n' >"${uninstall_home}/.qwen/QWEN.md"
-printf 'user cline\n' >"${uninstall_home}/.cline/data/settings/rules/agent-ready.md"
+printf 'user cline\n' >"${uninstall_home}/.cline/rules/agent-ready.md"
 printf 'user kilo\n' >"${uninstall_home}/.config/kilo/AGENTS.md"
 printf 'user crush\n' >"${uninstall_home}/.config/crush/CRUSH.md"
 printf 'user goose\n' >"${uninstall_home}/.config/goose/AGENTS.md"
@@ -1721,7 +1721,7 @@ uninstall_user_targets=(
 	"${uninstall_home}/.grok/rules/agent-ready.md"
 	"${uninstall_home}/.config/opencode/AGENTS.md"
 	"${uninstall_home}/.qwen/QWEN.md"
-	"${uninstall_home}/.cline/data/settings/rules/agent-ready.md"
+	"${uninstall_home}/.cline/rules/agent-ready.md"
 	"${uninstall_home}/.config/kilo/AGENTS.md"
 	"${uninstall_home}/.config/crush/CRUSH.md"
 	"${uninstall_home}/.config/goose/AGENTS.md"
@@ -1739,7 +1739,7 @@ run_release "${uninstall_home}" "${uninstall_bins}" v9.9.4 "${test_path}" \
 [ -L "${uninstall_bins}/agent-ready" ]
 [ "$(readlink "${uninstall_bins}/agent-ready")" = "${uninstall_versions}/v9.9.4/agent-ready" ]
 [ -f "${uninstall_home}/.config/agent-ready/receipt" ]
-[ -f "${uninstall_home}/.codeium/windsurf/memories/global_rules.md" ]
+[ -f "${uninstall_home}/.devin/global_rules.md" ]
 rg -qx 'languages=go' "${uninstall_home}/.config/agent-ready/receipt"
 
 # --dry-run reports every target and changes not one byte.
@@ -1823,8 +1823,8 @@ for target in "${uninstall_user_targets[@]}"; do
 	}
 done
 [ -L "${uninstall_home}/.claude/CLAUDE.md" ]
-[ -f "${uninstall_home}/.codeium/windsurf/memories/global_rules.md" ]
-[ ! -s "${uninstall_home}/.codeium/windsurf/memories/global_rules.md" ]
+[ -f "${uninstall_home}/.devin/global_rules.md" ]
+[ ! -s "${uninstall_home}/.devin/global_rules.md" ]
 jq -e '
 	.version == 1 and
 	.hooks.stop[0].command == "./hooks/stop.sh" and
@@ -2025,6 +2025,352 @@ run_uninstall_checkout "${gemini_only_home}" >"${work}/gemini-only-uninstall.out
 rg -q '^Gemini CLI:' "${work}/gemini-only-uninstall.out"
 if rg -q 'Antigravity|antigravity' "${work}/gemini-only-uninstall.out"; then
 	printf 'uninstall reported Antigravity for a Gemini-only file\n' >&2
+	exit 1
+fi
+
+# --- regressions from the v1.5.0 audit ------------------------------------------
+regression_install() {
+	local home="$1"
+	shift
+	HOME="${home}" XDG_CONFIG_HOME="${home}/.config" XDG_DATA_HOME="${home}/.local/share" \
+		CODEX_HOME="${home}/.codex" PATH="${test_path}" "${root}/install.sh" "$@"
+}
+has_no_block() { [ ! -f "$1" ] || ! rg -qF 'agent-ready:start' "$1"; }
+stale_block() { printf '<!-- agent-ready:start -->\nold\n<!-- agent-ready:end -->\n' >"$1"; }
+
+# A block written where the agent no longer reads it moves to the file it does.
+relocated_home="${work}/relocated-home"
+mkdir -p "${relocated_home}/.cline/data/settings/rules" "${relocated_home}/.codeium/windsurf/memories" "${relocated_home}/.devin"
+stale_block "${relocated_home}/.cline/data/settings/rules/agent-ready.md"
+stale_block "${relocated_home}/.codeium/windsurf/memories/global_rules.md"
+regression_install "${relocated_home}" --agent cline,windsurf --configure-only >/dev/null 2>&1
+rg -q '^Tool routing' "${relocated_home}/.cline/rules/agent-ready.md"
+rg -q '^Tool routing' "${relocated_home}/.devin/global_rules.md"
+has_no_block "${relocated_home}/.cline/data/settings/rules/agent-ready.md"
+# The older Windsurf may still be in use, so only uninstall removes its block.
+rg -qF 'agent-ready:start' "${relocated_home}/.codeium/windsurf/memories/global_rules.md"
+run_uninstall_checkout "${relocated_home}" >/dev/null 2>&1
+has_no_block "${relocated_home}/.codeium/windsurf/memories/global_rules.md"
+has_no_block "${relocated_home}/.devin/global_rules.md"
+
+# A machine with only the older Windsurf app stays on the file that app reads.
+old_windsurf_home="${work}/old-windsurf-home"
+mkdir -p "${old_windsurf_home}/.codeium/windsurf"
+regression_install "${old_windsurf_home}" --agent windsurf --configure-only >/dev/null 2>&1
+rg -q '^Tool routing' "${old_windsurf_home}/.codeium/windsurf/memories/global_rules.md"
+[ ! -e "${old_windsurf_home}/.devin" ]
+
+# A Pi override appearing after install: uninstall still finds the first block,
+# and a reinstall moves it instead of leaving two.
+pi_late_home="${work}/pi-late-home"
+regression_install "${pi_late_home}" --agent pi --configure-only >/dev/null 2>&1
+printf 'user pi override\n' >"${pi_late_home}/.pi/agent/AGENTS.override.md"
+run_uninstall_checkout "${pi_late_home}" >/dev/null 2>&1
+has_no_block "${pi_late_home}/.pi/agent/AGENTS.md"
+[ "$(cat "${pi_late_home}/.pi/agent/AGENTS.override.md")" = 'user pi override' ]
+pi_move_home="${work}/pi-move-home"
+regression_install "${pi_move_home}" --agent pi --configure-only >/dev/null 2>&1
+printf 'user pi override\n' >"${pi_move_home}/.pi/agent/AGENTS.override.md"
+regression_install "${pi_move_home}" --agent pi --configure-only >/dev/null 2>&1
+has_no_block "${pi_move_home}/.pi/agent/AGENTS.md"
+rg -q '^Tool routing' "${pi_move_home}/.pi/agent/AGENTS.override.md"
+
+# A stale candidate that is a symlink to another agent's file keeps that agent's
+# block; a candidate that cannot resolve stops the run before any write.
+shared_home="${work}/shared-home"
+mkdir -p "${shared_home}/.claude" "${shared_home}/.codex"
+printf 'user claude\n' >"${shared_home}/.claude/CLAUDE.md"
+ln -s "${shared_home}/.claude/CLAUDE.md" "${shared_home}/.codex/AGENTS.md"
+printf 'user override\n' >"${shared_home}/.codex/AGENTS.override.md"
+HOME="${shared_home}" XDG_CONFIG_HOME="${shared_home}/.config" CLAUDE_CONFIG_DIR="${shared_home}/.claude" \
+	CODEX_HOME="${shared_home}/.codex" PATH="${test_path}" \
+	"${root}/install.sh" --agent claude,codex --configure-only >/dev/null 2>&1
+[ "$(rg -cF 'agent-ready:start' "${shared_home}/.claude/CLAUDE.md")" -eq 1 ]
+[ "$(rg -cF 'agent-ready:start' "${shared_home}/.codex/AGENTS.override.md")" -eq 1 ]
+loop_home="${work}/loop-home"
+mkdir -p "${loop_home}/.codex"
+ln -s AGENTS.override.md "${loop_home}/.codex/AGENTS.override.md"
+if regression_install "${loop_home}" --agent codex --configure-only --dry-run >/dev/null 2>&1; then
+	printf 'dry run accepted a symlink loop as a stale candidate\n' >&2
+	exit 1
+fi
+if regression_install "${loop_home}" --agent codex --configure-only >/dev/null 2>&1; then
+	printf 'install accepted a symlink loop as a stale candidate\n' >&2
+	exit 1
+fi
+[ ! -e "${loop_home}/.codex/AGENTS.md" ]
+
+# Local edits in a block about to move stop the run before anything is written.
+pi_edit_home="${work}/pi-edit-home"
+regression_install "${pi_edit_home}" --agent pi --configure-only >/dev/null 2>&1
+awk -v e='<!-- agent-ready:end -->' '$0 == e { print "local edit" } { print }' \
+	"${pi_edit_home}/.pi/agent/AGENTS.md" >"${work}/pi-edit" && cp "${work}/pi-edit" "${pi_edit_home}/.pi/agent/AGENTS.md"
+printf 'user pi override\n' >"${pi_edit_home}/.pi/agent/AGENTS.override.md"
+if regression_install "${pi_edit_home}" --agent pi --configure-only >"${work}/pi-edit.out" 2>&1; then
+	printf 'install moved a block with local edits\n' >&2
+	exit 1
+fi
+[ "$(cat "${pi_edit_home}/.pi/agent/AGENTS.override.md")" = 'user pi override' ]
+
+# Codex reads a non-empty override instead of AGENTS.md, and CodeGraph's section
+# in AGENTS.md is hidden with it, so the block keeps its own Code graph line.
+codex_override_home="${work}/codex-override-home"
+mkdir -p "${codex_override_home}/.codex"
+printf 'user override\n' >"${codex_override_home}/.codex/AGENTS.override.md"
+regression_install "${codex_override_home}" --agent codex --configure-only >/dev/null 2>&1
+rg -q '^Tool routing' "${codex_override_home}/.codex/AGENTS.override.md"
+rg -qF 'Code graph:' "${codex_override_home}/.codex/AGENTS.override.md"
+has_no_block "${codex_override_home}/.codex/AGENTS.md"
+codex_empty_home="${work}/codex-empty-home"
+mkdir -p "${codex_empty_home}/.codex"
+: >"${codex_empty_home}/.codex/AGENTS.override.md"
+regression_install "${codex_empty_home}" --agent codex --configure-only >/dev/null 2>&1
+rg -q '^Tool routing' "${codex_empty_home}/.codex/AGENTS.md"
+[ ! -s "${codex_empty_home}/.codex/AGENTS.override.md" ]
+
+# CRLF markers, and a directory where a file belongs, stop before any write; a
+# dangling legacy Cursor link is simply not a legacy block.
+crlf_home="${work}/crlf-home"
+regression_install "${crlf_home}" --agent qwen --configure-only >/dev/null 2>&1
+awk '{ printf "%s\r\n", $0 }' "${crlf_home}/.qwen/QWEN.md" >"${work}/crlf" && cp "${work}/crlf" "${crlf_home}/.qwen/QWEN.md"
+if regression_install "${crlf_home}" --agent qwen --configure-only >/dev/null 2>&1; then
+	printf 'install accepted CRLF agent-ready markers\n' >&2
+	exit 1
+fi
+[ "$(rg -cF 'agent-ready:start' "${crlf_home}/.qwen/QWEN.md")" -eq 1 ]
+directory_home="${work}/directory-home"
+mkdir -p "${directory_home}/.qwen/QWEN.md"
+if regression_install "${directory_home}" --agent qwen --configure-only --dry-run >"${work}/directory.out" 2>&1; then
+	printf 'dry run accepted a directory as an instruction file\n' >&2
+	exit 1
+fi
+rg -qF 'not a regular file' "${work}/directory.out"
+dangling_home="${work}/dangling-home"
+mkdir -p "${dangling_home}/.cursor"
+ln -s "${dangling_home}/nowhere" "${dangling_home}/.cursor/AGENTS.md"
+regression_install "${dangling_home}" --agent cursor --configure-only --dry-run >/dev/null 2>&1
+
+# Merging a user's config keeps its mode, and a dotfiles symlink stays a symlink.
+mode_home="${work}/mode-home"
+mkdir -p "${mode_home}/.cursor" "${mode_home}/dotfiles"
+printf '{"version":1,"hooks":{}}\n' >"${mode_home}/.cursor/hooks.json"
+printf '{"mcpServers":{"mine":{"command":"mine"}}}\n' >"${mode_home}/dotfiles/mcp.json"
+ln -s "${mode_home}/dotfiles/mcp.json" "${mode_home}/.cursor/mcp.json"
+chmod 644 "${mode_home}/.cursor/hooks.json" "${mode_home}/dotfiles/mcp.json"
+regression_install "${mode_home}" --agent cursor --configure-only >/dev/null 2>&1
+HOME="${mode_home}" XDG_CONFIG_HOME="${mode_home}/.config" PATH="${test_path}" \
+	"${root}/languages/go/install.sh" --agent cursor --configure-only >/dev/null 2>&1
+[ -n "$(find "${mode_home}/.cursor/hooks.json" -perm 644)" ]
+[ -n "$(find "${mode_home}/dotfiles/mcp.json" -perm 644)" ]
+[ -L "${mode_home}/.cursor/mcp.json" ]
+jq -e '.mcpServers.gopls and .mcpServers.mine' "${mode_home}/dotfiles/mcp.json" >/dev/null
+
+# Go support without --agent stays with the agents an explicit install named.
+go_explicit_home="${work}/go-explicit-home"
+mkdir -p "${go_explicit_home}"
+regression_install "${go_explicit_home}" --agent claude --configure-only >/dev/null 2>&1
+HOME="${go_explicit_home}" XDG_CONFIG_HOME="${go_explicit_home}/.config" PATH="${test_path}" \
+	"${root}/languages/go/install.sh" --configure-only >/dev/null 2>&1
+rg -qx 'agents=claude' "${go_explicit_home}/.config/agent-ready/receipt"
+rg -qx 'languages=go' "${go_explicit_home}/.config/agent-ready/receipt"
+[ ! -e "${go_explicit_home}/.codex/AGENTS.md" ]
+[ ! -e "${go_explicit_home}/.cursor/mcp.json" ]
+rg -qF 'use gopls where compiler semantics matter' "${go_explicit_home}/.claude/CLAUDE.md"
+
+# A release-binaries install keeps that tool mode when Homebrew appears later.
+tools_mode_home="${work}/tools-mode-home"
+mkdir -p "${tools_mode_home}/.config/agent-ready"
+printf 'schema=1\nversion=v9.9.0\nagents=qwen\nconfigured=qwen\nlanguages=\ntools=binaries\nupdated_at=2026-11-01T00:00:00Z\n' \
+	>"${tools_mode_home}/.config/agent-ready/receipt"
+HOME="${tools_mode_home}" XDG_CONFIG_HOME="${tools_mode_home}/.config" PATH="${update_bin}:${test_path}" \
+	AGENT_READY_OS=Linux AGENT_READY_ARCH=x86_64 AGENT_READY_GITHUB_API="file://${gh_api}" \
+	bash "${root}/agent-ready" apply-update --from v9.9.0 >/dev/null 2>&1
+[ ! -e "${tools_mode_home}/brew-calls" ]
+rg -qx 'tools=binaries' "${tools_mode_home}/.config/agent-ready/receipt"
+
+# A failed release-notes request does not turn a finished update into an error.
+notes_home="${work}/notes-home"
+notes_bins="${work}/notes-launcher-bin"
+notes_bin="${work}/notes-bin"
+mkdir -p "${notes_home}" "${notes_bins}" "${notes_bin}"
+cat >"${notes_bin}/curl" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+*/releases/tags/v9.9.1*)
+	count=\$((\$(cat "\${HOME}/notes-count" 2>/dev/null || printf 0) + 1))
+	printf '%s' "\${count}" >"\${HOME}/notes-count"
+	if [ "\${count}" -gt 1 ]; then printf 'curl: (7) unreachable\n' >&2; exit 7; fi
+	;;
+esac
+exec "${update_bin}/curl" "\$@"
+EOF
+chmod +x "${notes_bin}/curl"
+run_release "${notes_home}" "${notes_bins}" v9.9.0 "${base_bin}" --agent codex --configure-only >/dev/null
+saved_update_path="${update_path}"
+update_path="${notes_bin}:${update_path}"
+run_update "${notes_home}" "${notes_bins}" 0 v9.9.1 >"${work}/notes.out" 2>&1
+update_path="${saved_update_path}"
+rg -qF 'Start a new agent session' "${work}/notes.out"
+rg -qx 'version=v9.9.1' "${notes_home}/.config/agent-ready/receipt"
+
+# A dry run through the verified bootstrap path writes nothing, and the flag works
+# as the first argument too.
+self_dry_home="${work}/self-dry-home"
+mkdir -p "${self_dry_home}"
+HOME="${self_dry_home}" XDG_CONFIG_HOME="${self_dry_home}/.config" XDG_DATA_HOME="${self_dry_home}/.local/share" \
+	PATH="${test_path}" bash "${root}/agent-ready" --self-install --agent qwen --configure-only --dry-run >/dev/null 2>&1
+[ ! -e "${self_dry_home}/.local" ]
+HOME="${self_dry_home}" XDG_CONFIG_HOME="${self_dry_home}/.config" XDG_DATA_HOME="${self_dry_home}/.local/share" \
+	PATH="${test_path}" bash "${root}/agent-ready" --dry-run --agent qwen --configure-only >/dev/null 2>&1
+[ ! -e "${self_dry_home}/.qwen" ]
+
+# Migrations run in version order across a major version.
+order_home="${work}/order-home"
+order_tree="${work}/order-tree"
+mkdir -p "${order_home}"
+cp -R "${root}" "${order_tree}"
+printf 'v2.0.0\n' >"${order_tree}/VERSION"
+for migration in v1.9.0-a v1.10.0-b v2.0.0-c; do
+	# shellcheck disable=SC2016 # ${HOME} belongs to the generated script
+	printf '#!/bin/sh\nprintf "%%s\\n" %s >>"${HOME}/migrations"\n' "${migration}" >"${order_tree}/migrations/${migration}.sh"
+	chmod +x "${order_tree}/migrations/${migration}.sh"
+done
+regression_install "${order_home}" --agent qwen --configure-only >/dev/null 2>&1
+HOME="${order_home}" XDG_CONFIG_HOME="${order_home}/.config" PATH="${test_path}" \
+	bash "${order_tree}/agent-ready" apply-update --from v1.8.0 >/dev/null 2>&1
+[ "$(tr '\n' ' ' <"${order_home}/migrations")" = 'v1.9.0-a v1.10.0-b v2.0.0-c ' ]
+
+# Rollback to a release whose strict receipt reader rejects a newer agent: this
+# stand-in fails the way v1.4.1 does on a receipt or --agent naming pi.
+rollback_new_home="${work}/rollback-new-home"
+rollback_old_tree="${rollback_new_home}/.local/share/agent-ready/versions/v1.4.1"
+rollback_receipt="${rollback_new_home}/.config/agent-ready/receipt"
+mkdir -p "${rollback_old_tree}" "${rollback_new_home}/.config/agent-ready"
+cat >"${rollback_old_tree}/install.sh" <<'EOF'
+#!/usr/bin/env bash
+if grep -q 'pi' "${HOME}/.config/agent-ready/receipt" || [ -e "${HOME}/old-release-fails" ]; then
+	exit 1
+fi
+# Ctrl-C reaches the whole foreground process group.
+if [ -e "${HOME}/old-release-interrupted" ]; then
+	kill -INT "${PPID}"
+	kill -INT "$$"
+fi
+printf '%s\n' "$*" >"${HOME}/old-release-args"
+EOF
+write_rollback_receipt() {
+	printf 'schema=1\nversion=v1.5.0\nagents=%s\nconfigured=%s\nlanguages=\ntools=none\nupdated_at=2026-11-01T00:00:00Z\n' \
+		"$1" "$2" >"${rollback_receipt}"
+}
+run_rollback_new() {
+	HOME="${rollback_new_home}" XDG_CONFIG_HOME="${rollback_new_home}/.config" \
+		XDG_DATA_HOME="${rollback_new_home}/.local/share" \
+		AGENT_READY_BIN_DIR="${rollback_new_home}/bin" PATH="${test_path}" \
+		bash "${root}/agent-ready" rollback
+}
+write_rollback_receipt pi pi
+if run_rollback_new >/dev/null 2>&1; then
+	printf 'rollback to a release that supports none of the agents succeeded\n' >&2
+	exit 1
+fi
+rg -qx 'agents=pi' "${rollback_receipt}"
+write_rollback_receipt claude,pi claude,pi
+touch "${rollback_new_home}/old-release-fails"
+if run_rollback_new >/dev/null 2>&1; then
+	printf 'rollback ignored a failing older installer\n' >&2
+	exit 1
+fi
+rm "${rollback_new_home}/old-release-fails"
+rg -qx 'agents=claude,pi' "${rollback_receipt}"
+[ ! -e "${rollback_new_home}/bin/agent-ready" ]
+touch "${rollback_new_home}/old-release-interrupted"
+run_rollback_new >/dev/null 2>&1 || true
+rm "${rollback_new_home}/old-release-interrupted"
+rg -qx 'agents=claude,pi' "${rollback_receipt}"
+[ "$(find "${rollback_new_home}/.config/agent-ready" -name 'receipt.*' | wc -l | tr -d ' ')" -eq 0 ]
+write_rollback_receipt claude,pi claude,pi
+run_rollback_new >/dev/null 2>&1
+[ "$(cat "${rollback_new_home}/old-release-args")" = '--configure-only --agent claude' ]
+rg -qx 'configured=claude' "${rollback_receipt}"
+[ "$(readlink "${rollback_new_home}/bin/agent-ready")" = "${rollback_old_tree}/agent-ready" ]
+
+# A named downgrade narrows the receipt the same way, restores it when the release
+# cannot be installed, and a dry run changes nothing.
+publish_agent_ready v1.4.1 v1.4.1 "$(stamp_ago 48)"
+downgrade_home="${work}/downgrade-home"
+downgrade_bins="${work}/downgrade-launcher-bin"
+downgrade_receipt="${downgrade_home}/.config/agent-ready/receipt"
+mkdir -p "${downgrade_home}" "${downgrade_bins}"
+run_release "${downgrade_home}" "${downgrade_bins}" v9.9.0 "${base_bin}" --agent claude,pi --configure-only >/dev/null
+run_update "${downgrade_home}" "${downgrade_bins}" 0 --dry-run v1.4.1 >"${work}/downgrade.out" 2>&1
+rg -qx 'agents=claude,pi' "${downgrade_receipt}"
+rg -qF 'nothing changed' "${work}/downgrade.out"
+if run_update "${downgrade_home}" "${downgrade_bins}" 0 v1.0.1 >/dev/null 2>&1; then
+	printf 'update to an unpublished release succeeded\n' >&2
+	exit 1
+fi
+rg -qx 'agents=claude,pi' "${downgrade_receipt}"
+run_update "${downgrade_home}" "${downgrade_bins}" 0 v1.4.1 >/dev/null 2>&1
+rg -qx 'agents=claude' "${downgrade_receipt}"
+rg -qx 'version=v1.4.1' "${downgrade_receipt}"
+
+# --upgrade keeps a launcher the user replaced, even with the state file left over.
+owned_home="${work}/owned-home"
+mkdir -p "${owned_home}/.local/bin" "${owned_home}/.config/agent-ready"
+printf 'v1\n' >"${owned_home}/.config/agent-ready/codegraph"
+printf '#!/bin/sh\necho user-owned\n' >"${owned_home}/.local/bin/codegraph"
+HOME="${owned_home}" XDG_CONFIG_HOME="${owned_home}/.config" XDG_DATA_HOME="${owned_home}/.local/share" \
+	PATH="${update_bin}:${test_path}" AGENT_READY_OS=Linux AGENT_READY_ARCH=x86_64 \
+	AGENT_READY_GITHUB_API="file://${gh_api}" "${root}/install-codegraph.sh" --upgrade >/dev/null 2>&1
+rg -qx 'echo user-owned' "${owned_home}/.local/bin/codegraph"
+
+# Uninstall names every RTK integration that needs its own command, keeps the
+# binaries state while osv-scanner remains, and claims no codegraph or timeout it
+# did not link.
+hints_home="${work}/hints-home"
+mkdir -p "${hints_home}/.gemini" "${hints_home}/.local/bin"
+run_uninstall_checkout_install "${hints_home}" --agent codex,gemini,copilot >/dev/null 2>&1
+printf 'osv-scanner v2\n' >"${hints_home}/.config/agent-ready/binaries"
+touch "${hints_home}/.local/bin/osv-scanner"
+ln -s /usr/local/lib/user-codegraph "${hints_home}/.local/bin/codegraph"
+ln -s /opt/homebrew/bin/gtimeout "${hints_home}/.local/bin/timeout"
+run_uninstall_checkout "${hints_home}" >"${work}/hints.out" 2>&1
+rg -qF 'rtk init -g --codex --uninstall' "${work}/hints.out"
+rg -qF 'rtk init -g --gemini --uninstall' "${work}/hints.out"
+rg -qF 'rtk init -g --copilot --uninstall' "${work}/hints.out"
+rg -qF 'timeout link: rm ' "${work}/hints.out"
+[ -f "${hints_home}/.config/agent-ready/binaries" ]
+if rg -qF 'codegraph bundle:' "${work}/hints.out"; then
+	printf 'uninstall offered to remove a codegraph it does not own\n' >&2
+	exit 1
+fi
+
+# The GitHub token reaches curl on stdin, never in its arguments, and only for the
+# real API.
+token_home="${work}/token-home"
+token_bin="${work}/token-bin"
+mkdir -p "${token_home}" "${token_bin}"
+cat >"${token_bin}/curl" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"${HOME}/curl-args"
+cat >>"${HOME}/curl-stdin"
+printf 200
+EOF
+chmod +x "${token_bin}/curl"
+HOME="${token_home}" XDG_CONFIG_HOME="${token_home}/.config" XDG_DATA_HOME="${token_home}/.local/share" \
+	PATH="${token_bin}:${test_path}" GITHUB_TOKEN=synthetic-value "${root}/install-codegraph.sh" </dev/null >/dev/null 2>&1 || true
+rg -qF 'api.github.com' "${token_home}/curl-args"
+rg -qF 'Authorization: Bearer synthetic-value' "${token_home}/curl-stdin"
+if rg -qF 'synthetic-value' "${token_home}/curl-args"; then
+	printf 'the GitHub token was passed in curl arguments\n' >&2
+	exit 1
+fi
+rm "${token_home}/curl-args" "${token_home}/curl-stdin"
+HOME="${token_home}" XDG_CONFIG_HOME="${token_home}/.config" XDG_DATA_HOME="${token_home}/.local/share" \
+	PATH="${token_bin}:${test_path}" GITHUB_TOKEN=synthetic-value AGENT_READY_GITHUB_API=https://example.invalid \
+	"${root}/install-codegraph.sh" </dev/null >/dev/null 2>&1 || true
+if rg -qF 'synthetic-value' "${token_home}/curl-stdin"; then
+	printf 'the GitHub token was sent to an API override\n' >&2
 	exit 1
 fi
 

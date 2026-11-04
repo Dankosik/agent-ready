@@ -156,7 +156,7 @@ The block varies slightly by setup:
 - With [Go support](#go-support), one more line is appended:
 
   ```markdown
-  - Go: use gopls where compiler semantics matter: `go_symbol_references` before renames, removals, signature changes, or interface-method changes; `go_diagnostics` after cross-file, type, or import changes; and `go_vulncheck` after dependency changes or for security work. Use `go_workspace` only when the module/workspace layout is unclear; otherwise follow the normal routing and finish with Go tests.
+  - Go: use gopls where compiler semantics matter: `go_symbol_references` before renames, removals, signature changes, or interface-method changes; `go_diagnostics` after cross-file, type, or import changes; and `go_vulncheck` after dependency changes or for security work. Use `go_workspace` only when the module/workspace layout is unclear; otherwise follow the normal routing and finish with Go tests. These are gopls MCP tools; where they are not available, use `gopls references <file>:<line>:<col>` and `gopls check <file>` instead.
   ```
 
 - Cursor has no global instruction file, so it gets the same text through a
@@ -178,16 +178,16 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstr
 | Agent | Selector | Where the routing goes |
 |---|---|---|
 | Claude Code | `claude` | `~/.claude/CLAUDE.md` |
-| Codex | `codex` | `~/.codex/AGENTS.md` |
+| Codex | `codex` | `~/.codex/AGENTS.md`, or a non-empty `AGENTS.override.md` there |
 | Cursor | `cursor` | global hook in `~/.cursor/hooks.json` |
 | Gemini CLI | `gemini` | `~/.gemini/GEMINI.md` |
 | Google Antigravity | `antigravity` | `~/.gemini/GEMINI.md` (shared with Gemini CLI) |
 | GitHub Copilot CLI | `copilot` | `~/.copilot/copilot-instructions.md` |
-| Windsurf | `windsurf` | `~/.codeium/windsurf/memories/global_rules.md` |
+| Windsurf / Devin Desktop | `windsurf` | `~/.devin/global_rules.md`, or `~/.codeium/windsurf/memories/global_rules.md` on a machine with only the older app's data |
 | Grok Build | `grok` | `~/.grok/rules/agent-ready.md` |
 | OpenCode | `opencode` | `~/.config/opencode/AGENTS.md` |
 | Qwen Code | `qwen` | `~/.qwen/QWEN.md` |
-| Cline CLI | `cline` | `~/.cline/data/settings/rules/agent-ready.md` |
+| Cline CLI | `cline` | `~/.cline/rules/agent-ready.md` |
 | Kilo Code | `kilo` | `~/.config/kilo/AGENTS.md` |
 | Crush | `crush` | `~/.config/crush/CRUSH.md` |
 | goose | `goose` | `~/.config/goose/AGENTS.md` |
@@ -200,7 +200,11 @@ instructions. Kilo Code is configured separately because its OpenCode-based CLI
 uses its own config directory. DeepSeek Harness runs through `npx`, so it is also
 detected by its `~/.dsh` directory. Pi loads only the first context file it finds
 in its agent directory, so the block joins an existing `AGENTS.override.md` or
-`CLAUDE.md` rather than hide it behind a new `AGENTS.md`.
+`CLAUDE.md` rather than hide it behind a new `AGENTS.md`. Codex likewise reads a
+non-empty `AGENTS.override.md` instead of `AGENTS.md`. When the file an agent
+loads changes, the next run moves the block there, and uninstall removes a block
+from either file. A block in the older Windsurf file stays until uninstall,
+because that app may still be in use alongside `~/.devin`.
 
 ## What's installed
 
@@ -306,6 +310,8 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.0/bootstr
 
 It installs `gopls`, connects `gopls mcp` to detected Codex, Claude Code, and
 Cursor installations, and adds the [Go routing line](#what-gets-added-to-agentsmd).
+After an install that named its agents, it stays with those agents instead of
+detecting more.
 
 <details>
 <summary>Configure Go for one agent</summary>
@@ -454,6 +460,10 @@ so a machine installed with `--configure-only` is compared with `--configure-onl
 anything fails; `mdq` is only warned about because upstream publishes no arm64
 Linux build. Neither `status` nor `doctor` writes anything or uses the network.
 
+A rollback or a named downgrade to a release that predates an agent drops that
+agent from the receipt and leaves its routing block in place until a newer
+release. If the older release cannot run, the receipt is restored.
+
 `rollback` is offline too. It finds the newest kept version below the receipt's
 and reruns that tree's installer with the receipt's agents, so the managed
 blocks and the receipt go back to that release; because an install keeps only
@@ -542,9 +552,10 @@ fixed for everyone.
 <details>
 <summary><strong>Can I preview the changes first?</strong></summary>
 
-Yes. Add `--dry-run` to any install, update, or uninstall command. It reports
+Yes. Add `--dry-run` to any base install, update, or uninstall command. It reports
 `would add`, `would refresh`, `unchanged`, or `blocked` for every file and
-writes nothing.
+writes nothing. `language go` has no dry run, because its setup changes each
+agent's own MCP configuration through that agent's CLI.
 
 </details>
 
