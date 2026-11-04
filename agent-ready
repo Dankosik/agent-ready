@@ -82,7 +82,7 @@ receipt_updated_at=
 version=$(cat "${root}/VERSION" 2>/dev/null || true)
 receipt_valid_version "${version}" || die "missing or invalid ${root}/VERSION"
 
-selectors='claude claude-code codex cursor cursor-agent gemini gemini-cli copilot github-copilot windsurf grok grok-build opencode open-code qwen qwen-code cline kilo kilocode kilo-code crush goose'
+selectors='claude claude-code codex cursor cursor-agent gemini gemini-cli antigravity antigravity-cli agy copilot github-copilot windsurf grok grok-build opencode open-code qwen qwen-code cline kilo kilocode kilo-code crush goose dsh deepseek-harness pi pi-coding-agent'
 
 is_selector() {
 	case " ${selectors} " in

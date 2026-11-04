@@ -4,7 +4,7 @@
 
 <p align="center">
   One command sets up Claude Code, Codex, Cursor, Gemini CLI, GitHub Copilot CLI,
-  Windsurf, and seven more agents on macOS, Linux, and WSL2.
+  Windsurf, and ten more agents on macOS, Linux, and WSL2.
 </p>
 
 <p align="center">
@@ -12,7 +12,7 @@
   <img alt="platform macOS, Linux, and WSL2" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL2-lightgrey">
   <a href="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Dankosik/agent-ready/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="17 generic tools" src="https://img.shields.io/badge/generic_tools-17-brightgreen">
-  <img alt="13 supported agents" src="https://img.shields.io/badge/agents-13-brightgreen">
+  <img alt="16 supported agents" src="https://img.shields.io/badge/agents-16-brightgreen">
 </p>
 
 <p align="center">
@@ -181,6 +181,7 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstr
 | Codex | `codex` | `~/.codex/AGENTS.md` |
 | Cursor | `cursor` | global hook in `~/.cursor/hooks.json` |
 | Gemini CLI | `gemini` | `~/.gemini/GEMINI.md` |
+| Google Antigravity | `antigravity` | `~/.gemini/GEMINI.md` (shared with Gemini CLI) |
 | GitHub Copilot CLI | `copilot` | `~/.copilot/copilot-instructions.md` |
 | Windsurf | `windsurf` | `~/.codeium/windsurf/memories/global_rules.md` |
 | Grok Build | `grok` | `~/.grok/rules/agent-ready.md` |
@@ -190,11 +191,16 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.4.1/bootstr
 | Kilo Code | `kilo` | `~/.config/kilo/AGENTS.md` |
 | Crush | `crush` | `~/.config/crush/CRUSH.md` |
 | goose | `goose` | `~/.config/goose/AGENTS.md` |
+| DeepSeek Harness | `dsh` | `~/.dsh/AGENTS.md` |
+| Pi | `pi` | `~/.pi/agent/AGENTS.md`, or the context file Pi already loads there |
 
 Several agents at once take a comma list, for example
 `bash -s -- --agent claude,codex`. OpenCode plugins use OpenCode's
 instructions. Kilo Code is configured separately because its OpenCode-based CLI
-uses its own config directory.
+uses its own config directory. DeepSeek Harness runs through `npx`, so it is also
+detected by its `~/.dsh` directory. Pi loads only the first context file it finds
+in its agent directory, so the block joins an existing `AGENTS.override.md` or
+`CLAUDE.md` rather than hide it behind a new `AGENTS.md`.
 
 ## What's installed
 
@@ -284,6 +290,9 @@ adds its prompt hook in `settings.json`. CodeGraph writes that section for
 Claude Code, Codex, Gemini CLI, and OpenCode, so when `codegraph` is installed
 their agent-ready block leaves out its own CodeGraph line rather than repeat the
 same rule in every prompt. Other agents keep the line and get the CLI routing.
+Google Antigravity shares Gemini CLI's file, so it drops the line only when Gemini
+is configured too or the install is automatic. CodeGraph's Antigravity target
+configures the desktop app; the `agy` CLI uses the CLI routing.
 
 </details>
 
