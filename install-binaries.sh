@@ -145,7 +145,6 @@ unpack() {
 			python3 -m zipfile -e "${file}" "${dir}"
 		fi
 		;;
-	*) return 1 ;;
 	esac
 }
 
@@ -228,16 +227,19 @@ install_tool() {
 		die "${name}: checksum mismatch for ${asset_name}; nothing installed"
 
 	dir="${work}/${name}"
-	if unpack "${file}" "${asset_name}" "${dir}"; then
+	case "${asset_name}" in
+	*.tar.gz | *.tgz | *.tar.xz | *.zip)
+		unpack "${file}" "${asset_name}" "${dir}" ||
+			die "${name}: could not unpack ${asset_name}; nothing installed"
 		for bin in ${bins//,/ }; do
 			found=$(find "${dir}" -type f -name "${bin}" | head -1)
 			[ -n "${found}" ] || die "${name}: ${bin} not found in ${asset_name}"
 			place "${found}" "${bin}"
 		done
-	else
-		# A bare executable: the asset is the only binary of this tool.
-		place "${file}" "${bins}"
-	fi
+		;;
+	# A bare executable: the asset is the only binary of this tool.
+	*) place "${file}" "${bins}" ;;
+	esac
 	record_tag "${name}" "${tag}"
 	printf '%s %s installed\n' "${name}" "${tag}"
 }
