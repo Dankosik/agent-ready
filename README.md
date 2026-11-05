@@ -306,10 +306,12 @@ Google Antigravity shares Gemini CLI's file, so it drops the line only when Gemi
 is configured too or the install is automatic. CodeGraph's Antigravity target
 configures the desktop app; the `agy` CLI uses the CLI routing.
 
-`codegraph install` writes a config by renaming a new file over it, which would
-turn a dotfiles symlink into a plain copy. The installer remembers the symlinks
-in those agents' directories, moves the new content to the link's target, and
-puts the link back. Running `codegraph install` or `codegraph uninstall` by hand
+Through v1.6.2, `codegraph install` writes a config by renaming a new file over
+it, which would turn a dotfiles symlink into a plain copy
+([fixed on CodeGraph's `main`](https://github.com/colbymchenry/codegraph/issues/2721),
+not yet released). The installer remembers the symlinks in those agents'
+directories, moves the new content to the link's target, and puts the link back.
+Running `codegraph install` or `codegraph uninstall` from those versions by hand
 has no such protection.
 
 </details>

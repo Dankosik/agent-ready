@@ -1062,11 +1062,12 @@ configure_codegraph() {
 		printf 'CodeGraph: could not disable telemetry; run codegraph telemetry off\n' >&2
 }
 
-# codegraph, and rtk for some files, write a config by renaming a temporary file over
-# it, which leaves a plain copy where a dotfiles symlink was: the dotfiles miss the
-# change, and uninstall cannot reach a block left in them. Every symlink where they
-# write is remembered before they run, and one that became a regular file gets its
-# new content moved to the link's target and the link put back.
+# codegraph through v1.6.2, and rtk for some files, write a config by renaming a
+# temporary file over it, which leaves a plain copy where a dotfiles symlink was: the
+# dotfiles miss the change, and uninstall cannot reach a block left in them. Every
+# symlink where they write is remembered before they run, and one that became a
+# regular file gets its new content moved to the link's target and the link put back.
+# codegraph's main branch writes through the link, which leaves nothing to restore.
 link_paths=()
 link_values=()
 
