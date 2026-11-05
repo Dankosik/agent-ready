@@ -1732,8 +1732,7 @@ foreign_link_target="${foreign_link_home}/dotfiles/agent-ready"
 foreign_link="${foreign_link_home}/.local/bin/agent-ready"
 mkdir -p "${foreign_link_home}/dotfiles" "${foreign_link_home}/.local/bin" \
 	"${foreign_link_home}/.local/share/agent-ready/versions/v9.9.0"
-printf '#!/bin/sh\nexit 0\n' >"${foreign_link_target}"
-chmod +x "${foreign_link_target}"
+fake_exec "${foreign_link_target}" 'exit 0'
 cp "${foreign_link_target}" "${work}/foreign-link-before"
 ln -s "${foreign_link_target}" "${foreign_link}"
 run_uninstall_checkout "${foreign_link_home}" >"${work}/uninstall-foreign-link.out"
