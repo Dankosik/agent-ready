@@ -78,8 +78,8 @@ for people who run its installers against real machines and real agent configs.
 Run the checks that apply to the exact candidate. The full acceptance ladder is:
 
 ```bash
-rtk bash -c 'for f in bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready; do bash -n "$f"; done'
-rtk shellcheck bootstrap.sh install.sh install-codegraph.sh install-binaries.sh test-install.sh verify.sh languages/go/install.sh languages/go/verify.sh lib/receipt.sh agent-ready
+rtk bash -c 'for f in ./*.sh languages/*/*.sh lib/*.sh agent-ready; do bash -n "$f"; done'
+rtk shellcheck ./*.sh languages/*/*.sh lib/*.sh agent-ready
 rtk actionlint
 rtk gitleaks dir --redact .
 rtk gitleaks git --redact .
