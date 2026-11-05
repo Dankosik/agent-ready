@@ -5,9 +5,10 @@ set -euo pipefail
 # These point the installer at agent configuration; a developer's own values must
 # not route a test at real files.
 unset CLAUDE_CONFIG_DIR CODEX_HOME COPILOT_HOME GROK_HOME QWEN_HOME DSH_HOME PI_CODING_AGENT_DIR CLINE_DIR CLINE_DATA_DIR
-unset GEMINI_CLI_HOME OPENCODE_CONFIG_DIR KILO_CONFIG_DIR KILO_DISABLE_CLAUDE_CODE KILO_DISABLE_CLAUDE_CODE_PROMPT
+unset GEMINI_CLI_HOME OPENCODE_CONFIG_DIR OPENCODE_DISABLE_CLAUDE_CODE OPENCODE_DISABLE_CLAUDE_CODE_PROMPT
+unset KILO_CONFIG_DIR KILO_CONFIG KILO_CONFIG_CONTENT KILO_DISABLE_CLAUDE_CODE KILO_DISABLE_CLAUDE_CODE_PROMPT
 unset CRUSH_GLOBAL_CONFIG GOOSE_PATH_ROOT
-unset XDG_CONFIG_HOME XDG_DATA_HOME GITHUB_TOKEN GH_TOKEN
+unset XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME GITHUB_TOKEN GH_TOKEN
 unset AGENT_READY_BIN_DIR AGENT_READY_CODEGRAPH_DIR AGENT_READY_OS AGENT_READY_ARCH AGENT_READY_REF
 unset AGENT_READY_GITHUB_API AGENT_READY_ARCHIVE_URL AGENT_READY_MIN_RELEASE_AGE
 
@@ -989,6 +990,23 @@ arch=aarch64 run_binaries >"${work}/binaries.out" 2>&1
 rg -qF 'mdq: no Linux aarch64 build is published upstream; skipped' "${work}/binaries.out"
 [ ! -e "${bins}/mdq" ]
 [ -x "${bins}/hyperfine" ]
+
+# regression: an archive that fails to unpack stops the run; it is never installed
+# as if it were the binary.
+rm -rf "${binary_home}"
+mkdir -p "${binary_home}" "${work}/broken-tar-bin"
+printf '#!/bin/sh\nexit 2\n' >"${work}/broken-tar-bin/tar"
+chmod +x "${work}/broken-tar-bin/tar"
+if HOME="${binary_home}" PATH="${work}/broken-tar-bin:${base_bin}" XDG_CONFIG_HOME="${binary_home}/.config" \
+	AGENT_READY_ARCH=x86_64 AGENT_READY_GITHUB_API="file://${gh_api}" \
+	"${root}/install-binaries.sh" >"${work}/binaries.out" 2>&1; then
+	printf 'install-binaries.sh unexpectedly succeeded with a failing tar\n' >&2
+	exit 1
+fi
+rg -qF 'could not unpack' "${work}/binaries.out"
+[ ! -e "${bins}/rtk" ]
+lacks_rtk_tag=$(awk '$1 == "rtk"' "${state}")
+[ -z "${lacks_rtk_tag}" ]
 
 # Homebrew stays the default where it exists; --binaries overrides it on Linux only.
 brew_home="${work}/brew-linux-home"
@@ -2774,5 +2792,98 @@ fix_run "${hint_brew_home}" "${work}/hint-brew-bin" "${root}/install.sh" --unins
 rg -qxF '  brew uninstall rtk ripgrep' "${work}/hint-brew.out"
 rg -qF -- '--keep-cli --target claude,copilot-cli' "${work}/hint-brew.out"
 lacks -qF '<agents>' "${work}/hint-brew.out"
+
+# regression: a removal command with a space in its path must not split into two
+# paths when pasted, least of all an rm -rf.
+hint_space_home="${work}/hint space home"
+hint_space_bin="${hint_space_home}/.local/bin"
+hint_space_bundle="${hint_space_home}/.local/share/agent-ready/codegraph"
+mkdir -p "${hint_space_bin}" "${hint_space_bundle}/versions/v1/bin" "${hint_space_home}/.config/agent-ready"
+printf 'schema=1\nversion=v1.0.0\nagents=claude\nconfigured=claude\nlanguages=\ntools=binaries\nupdated_at=2026-01-01T00:00:00Z\n' \
+	>"${hint_space_home}/.config/agent-ready/receipt"
+: >"${hint_space_bin}/rg"
+ln -s "${hint_space_bundle}/versions/v1/bin/codegraph" "${hint_space_bin}/codegraph"
+ln -s /nowhere/gtimeout "${hint_space_bin}/timeout"
+fix_run "${hint_space_home}" "${fixes_bin}" "${root}/install.sh" --uninstall >"${work}/hint-space.out"
+for prefix in '  rm ' '  codegraph bundle: rm -rf ' '  timeout link: rm '; do
+	hint_line=$(rg -F "${prefix}" "${work}/hint-space.out" | head -1)
+	[ -n "${hint_line}" ]
+	lacks -qF 'hint space home' <<<"${hint_line}"
+	rg -qF 'hint\ space\ home' <<<"${hint_line}"
+done
+
+# regression: Kilo reads only KILO_CONFIG_DIR when it is set, so a file in the default
+# directory must not attract the block.
+kilo_profile_home="${work}/kilo-profile-home"
+mkdir -p "${kilo_profile_home}/.config/kilo"
+printf 'my default rules\n' >"${kilo_profile_home}/.config/kilo/AGENTS.md"
+KILO_CONFIG_DIR="${kilo_profile_home}/profile" fix_run "${kilo_profile_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >/dev/null
+[ "$(block_count "${kilo_profile_home}/profile/AGENTS.md")" -eq 1 ]
+[ "$(block_count "${kilo_profile_home}/.config/kilo/AGENTS.md")" -eq 0 ]
+
+# regression: after Kilo's Claude migration a block in CLAUDE.md would never load,
+# and a variable the migration does not cover keeps CLAUDE.md in play.
+for kilo_state in .local/state/kilo .local/share/kilo/state; do
+	kilo_moved_home="${work}/kilo-migrated-${kilo_state//\//-}"
+	mkdir -p "${kilo_moved_home}/.claude" "${kilo_moved_home}/${kilo_state}"
+	printf 'my claude notes\n' >"${kilo_moved_home}/.claude/CLAUDE.md"
+	printf '{}\n' >"${kilo_moved_home}/${kilo_state}/claude-migration.json"
+	fix_run "${kilo_moved_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo --dry-run >"${work}/kilo-migrated.out"
+	rg -qF "${kilo_moved_home}/.config/kilo/AGENTS.md" "${work}/kilo-migrated.out"
+done
+KILO_CONFIG='{}' fix_run "${kilo_moved_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo --dry-run >"${work}/kilo-migrated.out"
+rg -qF "${kilo_moved_home}/.claude/CLAUDE.md" "${work}/kilo-migrated.out"
+
+# regression: a new AGENTS.md hides CLAUDE.md from OpenCode 1.x, so the block joins
+# CLAUDE.md and CodeGraph, which would create that AGENTS.md, leaves OpenCode out.
+opencode_bin="${work}/opencode-bin"
+fix_bin "${opencode_bin}"
+printf '#!/bin/sh\necho "1.19.5"\n' >"${opencode_bin}/opencode"
+chmod +x "${opencode_bin}/opencode"
+opencode_home="${work}/opencode-v1-home"
+mkdir -p "${opencode_home}/.claude"
+printf 'my claude notes\n' >"${opencode_home}/.claude/CLAUDE.md"
+fix_run "${opencode_home}" "${opencode_bin}" "${root}/install.sh" --configure-only --agent opencode,codex >"${work}/opencode-v1.out" 2>&1
+[ ! -e "${opencode_home}/.config/opencode/AGENTS.md" ]
+[ "$(block_count "${opencode_home}/.claude/CLAUDE.md")" -eq 1 ]
+rg -q '^- Code graph:' "${opencode_home}/.claude/CLAUDE.md"
+rg -qF 'skipped MCP setup for OpenCode' "${work}/opencode-v1.out"
+rg -qF 'install --yes --target=codex --location=global' "${opencode_home}/codegraph-calls"
+fix_run "${opencode_home}" "${opencode_bin}" "${root}/install.sh" --uninstall >/dev/null
+[ "$(block_count "${opencode_home}/.claude/CLAUDE.md")" -eq 0 ]
+rg -qx 'my claude notes' "${opencode_home}/.claude/CLAUDE.md"
+
+# Automatic detection must not let CodeGraph's auto target create that file either.
+opencode_auto_home="${work}/opencode-v1-auto-home"
+mkdir -p "${opencode_auto_home}/.claude"
+printf 'my claude notes\n' >"${opencode_auto_home}/.claude/CLAUDE.md"
+fix_run "${opencode_auto_home}" "${opencode_bin}" "${root}/install.sh" --configure-only >/dev/null 2>&1
+[ "$(block_count "${opencode_auto_home}/.claude/CLAUDE.md")" -eq 1 ]
+lacks -qF -- '--target=auto' "${opencode_auto_home}/codegraph-calls"
+lacks -qF 'opencode' "${opencode_auto_home}/codegraph-calls"
+
+# An existing AGENTS.md is what OpenCode loads, and one holding only managed content
+# is pointed out, including after uninstall leaves it empty.
+opencode_own_home="${work}/opencode-v1-own-home"
+mkdir -p "${opencode_own_home}/.claude" "${opencode_own_home}/.config/opencode"
+printf 'my claude notes\n' >"${opencode_own_home}/.claude/CLAUDE.md"
+: >"${opencode_own_home}/.config/opencode/AGENTS.md"
+fix_run "${opencode_own_home}" "${opencode_bin}" "${root}/install.sh" --configure-only --agent opencode >"${work}/opencode-own.out" 2>&1
+[ "$(block_count "${opencode_own_home}/.config/opencode/AGENTS.md")" -eq 1 ]
+[ "$(block_count "${opencode_own_home}/.claude/CLAUDE.md")" -eq 0 ]
+rg -qF 'holds nothing of yours but hides' "${work}/opencode-own.out"
+fix_run "${opencode_own_home}" "${opencode_bin}" "${root}/install.sh" --uninstall >"${work}/opencode-own.out" 2>&1
+rg -qF 'holds nothing of yours but hides' "${work}/opencode-own.out"
+
+# OpenCode 2.x and an unreadable version read only AGENTS.md.
+printf '#!/bin/sh\necho "opencode v2.2.3"\n' >"${opencode_bin}/opencode"
+opencode_v2_home="${work}/opencode-v2-home"
+mkdir -p "${opencode_v2_home}/.claude"
+printf 'my claude notes\n' >"${opencode_v2_home}/.claude/CLAUDE.md"
+fix_run "${opencode_v2_home}" "${opencode_bin}" "${root}/install.sh" --configure-only --agent opencode >"${work}/opencode-v2.out" 2>&1
+[ "$(block_count "${opencode_v2_home}/.config/opencode/AGENTS.md")" -eq 1 ]
+[ "$(block_count "${opencode_v2_home}/.claude/CLAUDE.md")" -eq 0 ]
+lacks -qF 'skipped MCP setup' "${work}/opencode-v2.out"
+lacks -qF 'hides' "${work}/opencode-v2.out"
 
 printf 'installer routing checks passed\n'

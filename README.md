@@ -185,7 +185,7 @@ curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstr
 | GitHub Copilot CLI | `copilot` | `~/.copilot/copilot-instructions.md` |
 | Windsurf / Devin Desktop | `windsurf` | `~/.devin/global_rules.md`, or `~/.codeium/windsurf/memories/global_rules.md` on a machine with only the older app's data |
 | Grok Build | `grok` | `~/.grok/rules/agent-ready.md` |
-| OpenCode | `opencode` | `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` when set) |
+| OpenCode | `opencode` | `~/.config/opencode/AGENTS.md` (`OPENCODE_CONFIG_DIR` when set), or `~/.claude/CLAUDE.md` when OpenCode 1.x already loads that |
 | Qwen Code | `qwen` | `~/.qwen/QWEN.md` |
 | Cline CLI | `cline` | `~/.cline/rules/agent-ready.md` |
 | Kilo Code | `kilo` | `~/.config/kilo/AGENTS.md` (`KILO_CONFIG_DIR` when set), or `~/.claude/CLAUDE.md` when Kilo already loads that |
@@ -203,7 +203,12 @@ in its agent directory, so the block joins an existing `AGENTS.override.md` or
 `CLAUDE.md` rather than hide it behind a new `AGENTS.md`. Kilo Code loads the
 first of its `AGENTS.md` and `~/.claude/CLAUDE.md` that exists, so the block joins
 that `CLAUDE.md` for the same reason, and the installer points out a Kilo file that
-holds nothing of yours but still hides it. Codex likewise reads a
+holds nothing of yours but still hides it. After Kilo's Claude migration it no
+longer loads that `CLAUDE.md`, and `KILO_CONFIG_DIR` replaces its default directory,
+so the block follows both. OpenCode 1.x follows the same first-match rule, so it
+gets the same treatment. `codegraph install` would create the `AGENTS.md` that hides
+`CLAUDE.md`, so that one case skips the CodeGraph MCP entry for OpenCode and keeps
+the CLI routing. OpenCode 2.x reads only its `AGENTS.md`. Codex likewise reads a
 non-empty `AGENTS.override.md` instead of `AGENTS.md`. When the file an agent
 loads changes, the next run moves the block there, and uninstall removes a block
 from either file. A block in the older Windsurf file stays until uninstall,

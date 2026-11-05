@@ -141,13 +141,9 @@ pi_instructions() {
 	printf '%s\n' "${dir}/AGENTS.md"
 }
 
-# Kilo loads the first of these that exists, even an empty one, so a new AGENTS.md
-# would silently hide ~/.claude/CLAUDE.md, whichever agent wrote that file. The
-# block goes in whichever file Kilo actually loads. A selected Claude Code is about
-# to create CLAUDE.md, so it counts as existing.
-kilo_claude_disabled() {
+any_enabled() {
 	local value
-	for value in "${KILO_DISABLE_CLAUDE_CODE:-}" "${KILO_DISABLE_CLAUDE_CODE_PROMPT:-}"; do
+	for value in "$@"; do
 		case "${value}" in
 		1 | true | TRUE | True) return 0 ;;
 		esac
@@ -155,43 +151,115 @@ kilo_claude_disabled() {
 	return 1
 }
 
+# Once Kilo has attempted its Claude migration it stops loading ~/.claude/CLAUDE.md,
+# unless one of these variables puts it in a context the migration does not cover.
+# Without XDG_STATE_HOME its state stays under the data directory when that exists.
+kilo_claude_handed_off() {
+	local value
+	for value in "${CLAUDE_CONFIG_DIR:-}" "${KILO_CONFIG_DIR:-}" "${KILO_CONFIG:-}" "${KILO_CONFIG_CONTENT:-}"; do
+		[ -z "${value//[[:space:]]/}" ] || return 1
+	done
+	if [ -n "${XDG_STATE_HOME:-}" ]; then
+		[ -e "${XDG_STATE_HOME}/kilo/claude-migration.json" ]
+	else
+		[ -e "${XDG_DATA_HOME:-${HOME}/.local/share}/kilo/state/claude-migration.json" ] ||
+			[ -e "${HOME}/.local/state/kilo/claude-migration.json" ]
+	fi
+}
+
+# Kilo loads the first of these that exists, even an empty one, so a new AGENTS.md
+# would silently hide ~/.claude/CLAUDE.md, whichever agent wrote that file. The
+# block goes in whichever file Kilo actually loads. KILO_CONFIG_DIR replaces the
+# default directory rather than adding to it. A selected Claude Code is about to
+# create CLAUDE.md, so it counts as existing.
+kilo_claude_disabled() {
+	any_enabled "${KILO_DISABLE_CLAUDE_CODE:-}" "${KILO_DISABLE_CLAUDE_CODE_PROMPT:-}" || kilo_claude_handed_off
+}
+
 kilo_default_instructions() {
 	printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/kilo/AGENTS.md"
 }
 
 kilo_instructions() {
-	local default claude="${HOME}/.claude/CLAUDE.md" profile=
-	default=$(kilo_default_instructions)
-	[ -z "${KILO_CONFIG_DIR:-}" ] || profile="${KILO_CONFIG_DIR}/AGENTS.md"
-	if [ -n "${profile}" ] && [ -f "${profile}" ]; then
-		printf '%s\n' "${profile}"
-	elif [ -f "${default}" ]; then
-		printf '%s\n' "${default}"
-	elif ! kilo_claude_disabled && { [ -f "${claude}" ] || { agent_selected claude && [ -z "${CLAUDE_CONFIG_DIR:-}" ]; }; }; then
+	local own claude="${HOME}/.claude/CLAUDE.md"
+	if [ -n "${KILO_CONFIG_DIR:-}" ]; then
+		own="${KILO_CONFIG_DIR}/AGENTS.md"
+	else
+		own=$(kilo_default_instructions)
+	fi
+	if [ ! -f "${own}" ] && ! kilo_claude_disabled &&
+		{ [ -f "${claude}" ] || { agent_selected claude && [ -z "${CLAUDE_CONFIG_DIR:-}" ]; }; }; then
 		printf '%s\n' "${claude}"
 	else
-		printf '%s\n' "${profile:-${default}}"
+		printf '%s\n' "${own}"
 	fi
 }
 
-# A file with nothing but the block, or left empty by uninstall, still hides
-# CLAUDE.md. Whether to delete it is the user's call, so it is only pointed out.
-kilo_hiding_notice() {
+# OpenCode 1.x loads the first of its AGENTS.md and ~/.claude/CLAUDE.md that exists,
+# even an empty one; 2.x reads only AGENTS.md, and so does a version this cannot
+# read. Asked once, because the path functions run many times per install.
+opencode_major=
+if command -v opencode >/dev/null 2>&1; then
+	opencode_major=$(opencode --version 2>/dev/null </dev/null |
+		sed -n 's/^[^0-9]*\([0-9][0-9]*\)\..*/\1/p' | head -1) || opencode_major=
+fi
+
+opencode_reads_claude() {
+	[ "${opencode_major}" = 1 ] &&
+		! any_enabled "${OPENCODE_DISABLE_CLAUDE_CODE:-}" "${OPENCODE_DISABLE_CLAUDE_CODE_PROMPT:-}"
+}
+
+opencode_own_instructions() {
+	printf '%s\n' "${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/opencode}/AGENTS.md"
+}
+
+# The same rule as Kilo: the block joins a CLAUDE.md a new AGENTS.md would hide.
+opencode_instructions() {
 	local own claude="${HOME}/.claude/CLAUDE.md"
+	own=$(opencode_own_instructions)
+	if opencode_reads_claude && [ ! -e "${own}" ] && [ ! -L "${own}" ] &&
+		{ [ -f "${claude}" ] || { agent_selected claude && [ -z "${CLAUDE_CONFIG_DIR:-}" ]; }; }; then
+		printf '%s\n' "${claude}"
+	else
+		printf '%s\n' "${own}"
+	fi
+}
+
+# `codegraph install` creates the default AGENTS.md, which would hide that CLAUDE.md
+# again, so OpenCode goes without the MCP entry there. It does not know
+# OPENCODE_CONFIG_DIR, and a file it writes elsewhere hides nothing.
+opencode_codegraph_hides() {
+	agent_selected opencode && [ -z "${OPENCODE_CONFIG_DIR:-}" ] &&
+		[ "$(opencode_instructions)" != "$(opencode_own_instructions)" ]
+}
+
+# A file with only managed content, or left empty by uninstall, still hides
+# CLAUDE.md. Whether to delete it is the user's call, so it is only pointed out.
+hiding_notice() {
+	local label="$1" name="$2" own="$3" claude="${HOME}/.claude/CLAUDE.md"
 	[ -f "${claude}" ] || return 0
-	! kilo_claude_disabled || return 0
-	own=$(kilo_instructions)
 	[ "${own}" != "${claude}" ] && [ -f "${own}" ] || return 0
 	[ ! "${own}" -ef "${claude}" ] || return 0
 	if awk -v s="${start}" -v e="${end}" '
-		$0 == s { skip = 1; next }
-		$0 == e { skip = 0; next }
+		$0 == s || $0 == "<!-- CODEGRAPH_START -->" { skip = 1; next }
+		$0 == e || $0 == "<!-- CODEGRAPH_END -->" { skip = 0; next }
 		!skip && NF { found = 1 }
 		END { exit !found }
 	' "${own}"; then
 		return 0
 	fi
-	printf 'Kilo Code: %s holds nothing of yours but hides %s from Kilo; delete it if Kilo should read that file\n' "${own}" "${claude}"
+	printf '%s: %s holds nothing of yours but hides %s from %s; delete it if %s should read that file\n' \
+		"${label}" "${own}" "${claude}" "${name}" "${name}"
+}
+
+kilo_hiding_notice() {
+	! kilo_claude_disabled || return 0
+	hiding_notice 'Kilo Code' Kilo "$(kilo_instructions)"
+}
+
+opencode_hiding_notice() {
+	opencode_reads_claude || return 0
+	hiding_notice OpenCode OpenCode "$(opencode_own_instructions)"
 }
 
 goose_default_instructions() {
@@ -237,7 +305,7 @@ agent_instructions() {
 	copilot) printf '%s\n' "${COPILOT_HOME:-${HOME}/.copilot}/copilot-instructions.md" ;;
 	windsurf) windsurf_instructions ;;
 	grok) printf '%s\n' "${GROK_HOME:-${HOME}/.grok}/rules/agent-ready.md" ;;
-	opencode) printf '%s\n' "${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME}/.config}/opencode}/AGENTS.md" ;;
+	opencode) opencode_instructions ;;
 	qwen) printf '%s\n' "${QWEN_HOME:-${HOME}/.qwen}/QWEN.md" ;;
 	cline) printf '%s\n' "${CLINE_DIR:-${HOME}/.cline}/rules/agent-ready.md" ;;
 	kilo) kilo_instructions ;;
@@ -261,7 +329,11 @@ agent_stale_candidates() {
 		printf '%s\n' "${HOME}/.devin/global_rules.md" "${HOME}/.codeium/windsurf/memories/global_rules.md"
 		;;
 	# Where the block sat before one of these variables moved the agent's file.
-	opencode) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md" ;;
+	opencode)
+		printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode/AGENTS.md"
+		[ -z "${OPENCODE_CONFIG_DIR:-}" ] || printf '%s\n' "${OPENCODE_CONFIG_DIR}/AGENTS.md"
+		printf '%s\n' "${HOME}/.claude/CLAUDE.md"
+		;;
 	crush) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/crush/CRUSH.md" ;;
 	goose) goose_default_instructions ;;
 	kilo)
@@ -314,7 +386,7 @@ agent_own_block() {
 		fi
 		;;
 	opencode)
-		if [ -n "${OPENCODE_CONFIG_DIR:-}" ]; then
+		if [ -n "${OPENCODE_CONFIG_DIR:-}" ] || opencode_codegraph_hides; then
 			printf '%s\n' "${routing}"
 		else
 			printf '%s\n' "${graph_routing}"
@@ -331,7 +403,7 @@ agent_own_block() {
 	# gets its section only through Gemini: an explicit gemini, or auto, which
 	# wires Gemini whenever ~/.gemini exists. Both ids must render one block.
 	antigravity)
-		if [ "${auto_detection}" -eq 1 ] || agent_selected gemini; then
+		if { [ "${auto_detection}" -eq 1 ] && ! opencode_codegraph_hides; } || agent_selected gemini; then
 			printf '%s\n' "${graph_routing}"
 		else
 			printf '%s\n' "${routing}"
@@ -660,7 +732,7 @@ preflight_stale() {
 	# Which app created ~/.devin is unknown, so the older Windsurf may still be in
 	# use: its block stays until uninstall rather than move on install. The same goes
 	# for a block left behind by a variable that may only select a profile, and for
-	# a CLAUDE.md that Kilo no longer loads but another agent may.
+	# a CLAUDE.md that Kilo or OpenCode no longer loads but another agent may.
 	case "${id}" in
 	windsurf | opencode | kilo | crush | goose) return 0 ;;
 	esac
@@ -963,14 +1035,19 @@ codegraph_target() {
 configure_codegraph() {
 	local id target targets=
 	command -v codegraph >/dev/null 2>&1 || return 0
-	if [ "${auto_detection}" -eq 1 ]; then
+	# Auto would wire OpenCode too, so that one case names the detected agents instead.
+	if [ "${auto_detection}" -eq 1 ] && ! opencode_codegraph_hides; then
 		targets=auto
 	else
 		for id in ${selected_agents}; do
+			if [ "${id}" = opencode ] && opencode_codegraph_hides; then
+				printf 'CodeGraph: skipped MCP setup for OpenCode, because its AGENTS.md would hide %s; the CLI routing still applies\n' "${HOME}/.claude/CLAUDE.md" >&2
+				continue
+			fi
 			target=$(codegraph_target "${id}")
 			if [ -n "${target}" ]; then
 				targets="${targets}${targets:+,}${target}"
-			else
+			elif [ "${auto_detection}" -eq 0 ]; then
 				printf 'CodeGraph: MCP setup is not available for %s; the CLI routing still applies\n' "${id}" >&2
 			fi
 		done
@@ -1298,7 +1375,7 @@ uninstall_tools_hint() {
 		for bin in rtk rg ast-grep sd uv uvx jq yq mdq gh wt git-wt difft gitleaks \
 			actionlint shellcheck hyperfine osv-scanner gopls; do
 			[ ! -e "${uninstall_bin_dir}/${bin}" ] ||
-				paths="${paths}${paths:+ }${uninstall_bin_dir}/${bin}"
+				paths="${paths}${paths:+ }$(printf '%q' "${uninstall_bin_dir}/${bin}")"
 		done
 		if [ -n "${paths}" ]; then
 			printf '\nTools are still installed; agent-ready does not remove them:\n'
@@ -1308,13 +1385,13 @@ uninstall_tools_hint() {
 	# Only a link into the bundle is ours; any other codegraph is the user's.
 	bundle="${AGENT_READY_CODEGRAPH_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/agent-ready/codegraph}"
 	case "$(readlink "${uninstall_bin_dir}/codegraph" 2>/dev/null || true)" in
-	"${bundle}"/*) printf '  codegraph bundle: rm -rf %s %s\n' "${bundle}" "${uninstall_bin_dir}/codegraph" ;;
+	"${bundle}"/*) printf '  codegraph bundle: rm -rf %q %q\n' "${bundle}" "${uninstall_bin_dir}/codegraph" ;;
 	*)
-		[ ! -e "${bundle}" ] || printf '  codegraph bundle: rm -rf %s\n' "${bundle}"
+		[ ! -e "${bundle}" ] || printf '  codegraph bundle: rm -rf %q\n' "${bundle}"
 		;;
 	esac
 	case "$(readlink "${uninstall_bin_dir}/timeout" 2>/dev/null || true)" in
-	*/gtimeout) printf '  timeout link: rm %s\n' "${uninstall_bin_dir}/timeout" ;;
+	*/gtimeout) printf '  timeout link: rm %q\n' "${uninstall_bin_dir}/timeout" ;;
 	esac
 	printf '  RTK integration: rtk init -g --uninstall\n'
 	# The plain command reaches only Claude Code, OpenCode, and Cursor.
@@ -1395,6 +1472,7 @@ uninstall_main() {
 	uninstall_state
 	uninstall_tools_hint
 	kilo_hiding_notice
+	opencode_hiding_notice
 }
 
 if [ "${uninstall}" -eq 1 ]; then
@@ -1610,6 +1688,7 @@ if agent_selected opencode; then
 	configure_rtk "$(agent_label opencode)" -g --opencode --hook-only --no-patch --no-trust-filters >/dev/null
 	printf 'OpenCode: configured RTK integration\n'
 	install_block "$(agent_instructions opencode)" "$(agent_label opencode)" "$(agent_block opencode)"
+	opencode_hiding_notice
 fi
 if agent_selected qwen; then
 	found=1
