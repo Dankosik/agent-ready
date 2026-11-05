@@ -1725,6 +1725,24 @@ cmp -s "${work}/foreign-before" "${foreign_bins}/agent-ready"
 rg -qF "keeping ${foreign_bins}/agent-ready: it was not installed by agent-ready" \
 	"${work}/uninstall-foreign.out"
 
+# So is a launcher that is a symlink into someone else's tree, and uninstall
+# leaves what it points at alone.
+foreign_link_home="${work}/foreign-link-home"
+foreign_link_target="${foreign_link_home}/dotfiles/agent-ready"
+foreign_link="${foreign_link_home}/.local/bin/agent-ready"
+mkdir -p "${foreign_link_home}/dotfiles" "${foreign_link_home}/.local/bin" \
+	"${foreign_link_home}/.local/share/agent-ready/versions/v9.9.0"
+printf '#!/bin/sh\nexit 0\n' >"${foreign_link_target}"
+chmod +x "${foreign_link_target}"
+cp "${foreign_link_target}" "${work}/foreign-link-before"
+ln -s "${foreign_link_target}" "${foreign_link}"
+run_uninstall_checkout "${foreign_link_home}" >"${work}/uninstall-foreign-link.out"
+[ "$(readlink "${foreign_link}")" = "${foreign_link_target}" ]
+cmp -s "${work}/foreign-link-before" "${foreign_link_target}"
+[ ! -e "${foreign_link_home}/.local/share/agent-ready/versions" ]
+rg -qF "keeping ${foreign_link}: it was not installed by agent-ready" \
+	"${work}/uninstall-foreign-link.out"
+
 # The tool state files outlive the configuration while their tools are there.
 uninstall_state_home="${work}/uninstall-state-home"
 uninstall_state_config="${uninstall_state_home}/.config/agent-ready"
@@ -2086,7 +2104,7 @@ run_rollback_new() {
 	HOME="${rollback_new_home}" XDG_CONFIG_HOME="${rollback_new_home}/.config" \
 		XDG_DATA_HOME="${rollback_new_home}/.local/share" \
 		AGENT_READY_BIN_DIR="${rollback_new_home}/bin" PATH="${test_path}" \
-		bash "${root}/agent-ready" rollback
+		"$@" bash "${root}/agent-ready" rollback
 }
 write_rollback_receipt pi pi
 refute 'rollback to a release that supports none of the agents succeeded' run_rollback_new >/dev/null 2>&1
@@ -2098,7 +2116,11 @@ rm "${rollback_new_home}/old-release-fails"
 rg -qx 'agents=claude,pi' "${rollback_receipt}"
 [ ! -e "${rollback_new_home}/bin/agent-ready" ]
 touch "${rollback_new_home}/old-release-interrupted"
-run_rollback_new >/dev/null 2>&1 || true
+# A job started with & inherits SIGINT ignored and bash cannot undo that, so the
+# suite would otherwise only exercise Ctrl-C when it runs in the foreground.
+run_rollback_new python3 -I -c 'import os, signal, sys
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+os.execvp(sys.argv[1], sys.argv[1:])' >/dev/null 2>&1 || true
 rm "${rollback_new_home}/old-release-interrupted"
 rg -qx 'agents=claude,pi' "${rollback_receipt}"
 [ "$(find "${rollback_new_home}/.config/agent-ready" -name 'receipt.*' | wc -l | tr -d ' ')" -eq 0 ]
