@@ -167,9 +167,9 @@ The source of the block is [`agent-routing.md`](agent-routing.md) (and
 
 ## Supported agents
 
-Automatic detection configures every agent below whose command (or, for Cursor
-and Windsurf, app bundle) it finds. To configure only one, pass its
-selector:
+Automatic detection configures every agent below whose command (or, for Cursor,
+Windsurf / Devin Desktop, and Google Antigravity, app bundle) it finds. To
+configure only one, pass its selector:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Dankosik/agent-ready/v1.5.1/bootstrap.sh | AGENT_READY_REF=v1.5.1 bash -s -- codex
@@ -305,6 +305,12 @@ same rule in every prompt. Other agents keep the line and get the CLI routing.
 Google Antigravity shares Gemini CLI's file, so it drops the line only when Gemini
 is configured too or the install is automatic. CodeGraph's Antigravity target
 configures the desktop app; the `agy` CLI uses the CLI routing.
+
+`codegraph install` writes a config by renaming a new file over it, which would
+turn a dotfiles symlink into a plain copy. The installer remembers the symlinks
+in those agents' directories, moves the new content to the link's target, and
+puts the link back. Running `codegraph install` or `codegraph uninstall` by hand
+has no such protection.
 
 </details>
 
