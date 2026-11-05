@@ -2886,4 +2886,94 @@ fix_run "${opencode_v2_home}" "${opencode_bin}" "${root}/install.sh" --configure
 lacks -qF 'skipped MCP setup' "${work}/opencode-v2.out"
 lacks -qF 'hides' "${work}/opencode-v2.out"
 
+# codegraph and rtk write a config by renaming over it, which would leave a plain
+# copy where a dotfiles symlink was. The link stays and its target gets what they
+# wrote, whether codegraph then succeeds or fails.
+links_bin="${work}/links-bin"
+fix_bin "${links_bin}"
+cat >"${links_bin}/codegraph" <<'EOF'
+#!/bin/sh
+[ "$1" = install ] || exit 0
+for file in "${HOME}/.claude/CLAUDE.md" "${HOME}/.claude.json"; do
+	{ cat "${file}"; printf 'written by codegraph\n'; } >"${file}.tmp"
+	mv "${file}.tmp" "${file}"
+done
+exit "${FAKE_CODEGRAPH_STATUS:-0}"
+EOF
+for status in 0 1; do
+	links_home="${work}/links-home-${status}"
+	mkdir -p "${links_home}/.claude" "${links_home}/dotfiles"
+	printf 'my rules\n' >"${links_home}/dotfiles/CLAUDE.md"
+	printf '{}\n' >"${links_home}/dotfiles/claude.json"
+	chmod 640 "${links_home}/dotfiles/CLAUDE.md"
+	ln -s ../dotfiles/CLAUDE.md "${links_home}/.claude/CLAUDE.md"
+	ln -s dotfiles/claude.json "${links_home}/.claude.json"
+	fix_run "${links_home}" "${links_bin}" env FAKE_CODEGRAPH_STATUS="${status}" \
+		"${root}/install.sh" --configure-only --agent claude >/dev/null 2>&1
+	[ "$(readlink "${links_home}/.claude/CLAUDE.md")" = ../dotfiles/CLAUDE.md ]
+	[ "$(readlink "${links_home}/.claude.json")" = dotfiles/claude.json ]
+	rg -qF 'my rules' "${links_home}/dotfiles/CLAUDE.md"
+	rg -qF 'written by codegraph' "${links_home}/dotfiles/CLAUDE.md"
+	rg -qF 'written by codegraph' "${links_home}/dotfiles/claude.json"
+	[ "$(block_count "${links_home}/dotfiles/CLAUDE.md")" -eq 1 ]
+	[ -n "$(find "${links_home}/dotfiles/CLAUDE.md" -perm 640)" ]
+done
+# Uninstall then reaches the block, because it is behind the link.
+fix_run "${links_home}" "${links_bin}" "${root}/install.sh" --uninstall >/dev/null 2>&1
+[ -L "${links_home}/.claude/CLAUDE.md" ]
+[ "$(block_count "${links_home}/dotfiles/CLAUDE.md")" -eq 0 ]
+rg -qF 'my rules' "${links_home}/dotfiles/CLAUDE.md"
+
+# A run that stops at a later step still puts back what an earlier one replaced.
+links_stop_bin="${work}/links-stop-bin"
+fix_bin "${links_stop_bin}"
+cat >"${links_stop_bin}/rtk" <<'EOF'
+#!/bin/sh
+case "$*" in *--codex*) exit 1 ;; esac
+file="${HOME}/.claude/settings.json"
+{ cat "${file}"; printf 'written by rtk\n'; } >"${file}.tmp"
+mv "${file}.tmp" "${file}"
+EOF
+links_stop_home="${work}/links-stop-home"
+mkdir -p "${links_stop_home}/.claude" "${links_stop_home}/dotfiles"
+printf '{}\n' >"${links_stop_home}/dotfiles/settings.json"
+ln -s ../dotfiles/settings.json "${links_stop_home}/.claude/settings.json"
+if fix_run "${links_stop_home}" "${links_stop_bin}" "${root}/install.sh" --configure-only --agent claude,codex >/dev/null 2>&1; then
+	printf 'the failing rtk step did not stop the install\n' >&2
+	exit 1
+fi
+[ -L "${links_stop_home}/.claude/settings.json" ]
+rg -qF 'written by rtk' "${links_stop_home}/dotfiles/settings.json"
+
+# Windsurf became Devin Desktop, whose shell command has a new name.
+devin_bin="${work}/devin-bin"
+fix_bin "${devin_bin}" devin-desktop
+devin_home="${work}/devin-home"
+fix_run "${devin_home}" "${devin_bin}" "${root}/install.sh" --configure-only >/dev/null 2>&1
+[ "$(block_count "${devin_home}/.devin/global_rules.md")" -eq 1 ]
+
+# Antigravity moved its configuration to ~/.gemini/config.
+antigravity_bin="${work}/antigravity-bin"
+fix_bin "${antigravity_bin}"
+antigravity_home="${work}/antigravity-home"
+mkdir -p "${antigravity_home}/.gemini/config"
+fix_run "${antigravity_home}" "${antigravity_bin}" "${root}/install.sh" --configure-only >/dev/null 2>&1
+rg -q '^configured=.*antigravity' "${antigravity_home}/.config/agent-ready/receipt"
+
+# OpenCode and Kilo parse their flags with Effect, which also takes yes, on, and y.
+flags_bin="${work}/flags-bin"
+fix_bin "${flags_bin}"
+printf '#!/bin/sh\necho "1.19.5"\n' >"${flags_bin}/opencode"
+chmod +x "${flags_bin}/opencode"
+for flag in yes on y; do
+	flags_home="${work}/flags-home-${flag}"
+	mkdir -p "${flags_home}/.claude"
+	printf 'my claude notes\n' >"${flags_home}/.claude/CLAUDE.md"
+	fix_run "${flags_home}" "${flags_bin}" env OPENCODE_DISABLE_CLAUDE_CODE="${flag}" KILO_DISABLE_CLAUDE_CODE="${flag}" \
+		"${root}/install.sh" --configure-only --agent opencode,kilo >/dev/null 2>&1
+	[ "$(block_count "${flags_home}/.claude/CLAUDE.md")" -eq 0 ]
+	[ "$(block_count "${flags_home}/.config/opencode/AGENTS.md")" -eq 1 ]
+	[ "$(block_count "${flags_home}/.config/kilo/AGENTS.md")" -eq 1 ]
+done
+
 printf 'installer routing checks passed\n'

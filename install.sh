@@ -141,11 +141,12 @@ pi_instructions() {
 	printf '%s\n' "${dir}/AGENTS.md"
 }
 
+# OpenCode and Kilo read these flags as Effect booleans, or lowercased in older code.
 any_enabled() {
 	local value
 	for value in "$@"; do
 		case "${value}" in
-		1 | true | TRUE | True) return 0 ;;
+		1 | true | TRUE | True | yes | on | y) return 0 ;;
 		esac
 	done
 	return 1
@@ -451,12 +452,13 @@ detect_cursor() {
 }
 detect_gemini() { command -v gemini >/dev/null 2>&1; }
 detect_antigravity() {
-	command -v agy >/dev/null 2>&1 || [ -d "${HOME}/.gemini/antigravity" ] ||
+	command -v agy >/dev/null 2>&1 || [ -d "${HOME}/.gemini/config" ] || [ -d "${HOME}/.gemini/antigravity" ] ||
 		[ -d /Applications/Antigravity.app ] || [ -d "${HOME}/Applications/Antigravity.app" ]
 }
 detect_copilot() { command -v copilot >/dev/null 2>&1; }
 detect_windsurf() {
-	command -v windsurf >/dev/null 2>&1 || [ -d "${HOME}/.devin" ] ||
+	command -v windsurf >/dev/null 2>&1 || command -v devin-desktop >/dev/null 2>&1 || [ -d "${HOME}/.devin" ] ||
+		[ -d /Applications/Devin.app ] || [ -d "${HOME}/Applications/Devin.app" ] ||
 		[ -d /Applications/Windsurf.app ] || [ -d "${HOME}/Applications/Windsurf.app" ]
 }
 detect_grok() { command -v grok >/dev/null 2>&1; }
@@ -1060,6 +1062,75 @@ configure_codegraph() {
 		printf 'CodeGraph: could not disable telemetry; run codegraph telemetry off\n' >&2
 }
 
+# codegraph through v1.6.2, and rtk for some files, write a config by renaming a
+# temporary file over it, which leaves a plain copy where a dotfiles symlink was: the
+# dotfiles miss the change, and uninstall cannot reach a block left in them. Every
+# symlink where they write is remembered before they run, and one that became a
+# regular file gets its new content moved to the link's target and the link put back.
+# codegraph's main branch writes through the link, which leaves nothing to restore.
+link_paths=()
+link_values=()
+
+remember_link() {
+	link_paths+=("$1")
+	link_values+=("$(readlink "$1")")
+}
+
+remember_links() {
+	local dir path
+	for dir in "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}" "${CODEX_HOME:-${HOME}/.codex}" "${HOME}/.cursor" "${HOME}/.gemini" \
+		"${COPILOT_HOME:-${HOME}/.copilot}" "${XDG_CONFIG_HOME:-${HOME}/.config}/opencode" \
+		"${HERMES_HOME:-${HOME}/.hermes}" "${HOME}/.kiro"; do
+		[ -d "${dir}" ] || continue
+		while IFS= read -r path; do
+			remember_link "${path}"
+		done < <(find -H "${dir}" -maxdepth 3 -type l 2>/dev/null)
+	done
+	if [ -L "${HOME}/.claude.json" ]; then remember_link "${HOME}/.claude.json"; fi
+}
+
+restore_link() {
+	local path="$1" value="$2" target tmp
+	case "${value}" in
+	/*) target="${value}" ;;
+	*) target="$(dirname -- "${path}")/${value}" ;;
+	esac
+	target=$(resolve_target "${target}") || return 1
+	if ! cmp -s "${path}" "${target}"; then
+		# A read-only target is the user's choice, as it is for an instruction file.
+		[ ! -e "${target}" ] || [ -w "${target}" ] || return 1
+		mkdir -p "$(dirname -- "${target}")" || return 1
+		tmp=$(mktemp "${target}.XXXXXX") || return 1
+		# The copy gives the temporary file the mode of whichever file already exists.
+		if ! { [ -f "${target}" ] && cp -p "${target}" "${tmp}" || cp -p "${path}" "${tmp}"; } ||
+			! cat "${path}" >"${tmp}" || ! mv "${tmp}" "${target}"; then
+			rm -f "${tmp}"
+			return 1
+		fi
+	fi
+	tmp=$(mktemp "${path}.XXXXXX") || return 1
+	rm -f "${tmp}"
+	if ! ln -s "${value}" "${tmp}" || ! mv -f "${tmp}" "${path}"; then
+		rm -f "${tmp}"
+		return 1
+	fi
+}
+
+restore_links() {
+	local i failed=0
+	for ((i = 0; i < ${#link_paths[@]}; i++)); do
+		[ -f "${link_paths[i]}" ] && [ ! -L "${link_paths[i]}" ] || continue
+		restore_link "${link_paths[i]}" "${link_values[i]}" || {
+			printf 'could not put back the symlink %s -> %s; the file there now holds the new content\n' \
+				"${link_paths[i]}" "${link_values[i]}" >&2
+			failed=1
+		}
+	done
+	link_paths=()
+	link_values=()
+	[ "${failed}" -eq 0 ]
+}
+
 # ---------------------------------------------------------------- uninstall
 # Uninstall removes only what this repository wrote: the managed blocks, its
 # own Cursor hook entry, and agent-ready's state. Tools and third-party
@@ -1523,6 +1594,8 @@ if [ "${codegraph_available}" -eq 1 ]; then
 	graph_routing="${graph_routing_tmp}"
 fi
 cleanup_routing() {
+	# Empty once the run has restored them, so this only acts on a run that stopped.
+	restore_links || true
 	[ -z "${routing_tmp}" ] || rm -f "${routing_tmp}"
 	[ -z "${graph_routing_tmp}" ] || rm -f "${graph_routing_tmp}"
 }
@@ -1641,6 +1714,8 @@ command -v rtk >/dev/null 2>&1 || {
 	exit 1
 }
 
+remember_links
+
 found=0
 if agent_selected claude; then
 	found=1
@@ -1726,6 +1801,7 @@ fi
 # Run last: a malformed instructions file must stop the installer before a
 # third-party installer gets a chance to edit it.
 configure_codegraph
+restore_links
 
 if [ "${found}" -eq 1 ]; then
 	configured_value=$(for id in ${selected_agents}; do printf '%s\n' "${id}"; done | merge_lists)
