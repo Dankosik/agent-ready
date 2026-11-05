@@ -113,10 +113,12 @@ filesystem, such as `~/projects`, rather than under `/mnt/c`.
 ## What gets added to AGENTS.md
 
 This is the exact block a `v1.5.3` install writes into an agent's global
-instruction file, here `~/.config/goose/AGENTS.md`. Codex gets the same block in
-`~/.codex/AGENTS.md`, Claude Code in `~/.claude/CLAUDE.md`, and so on (see
-[Supported agents](#supported-agents)). Nothing above or below the markers is
-touched.
+instruction file, here `~/.config/goose/AGENTS.md`. Other agents get it in their
+own files, such as `~/.codex/AGENTS.md` for Codex and `~/.claude/CLAUDE.md` for
+Claude Code (see [Supported agents](#supported-agents)), with the differences
+listed below. The block never changes anything outside its markers, but `rtk`
+and `codegraph install`, which the installer runs, may add their own lines to
+the same file.
 
 ```markdown
 <!-- agent-ready:start -->
