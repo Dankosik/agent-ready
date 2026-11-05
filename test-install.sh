@@ -17,6 +17,77 @@ work=$(mktemp -d)
 cleanup() { rm -rf "${work}"; }
 trap cleanup EXIT
 
+# Failures are written to the stderr the run started with, so a check whose output
+# goes to a file still reports on the terminal.
+exec 9>&2
+set -E
+fail() {
+	printf '%s\n' "$*" >&9
+	exit 1
+}
+# A bare check stops the run under set -e, and this says which one, with the lines
+# that called it when it sits in a helper. A command substitution runs without -e, so
+# a failure inside one matters only if its caller's check then fails, and that check
+# is reported.
+trap 'case $- in *e*) printf "test-install.sh:%s: exit %s: %s (called from: %s)\n" "$LINENO" "$?" "$BASH_COMMAND" "${BASH_LINENO[*]:-}" >&9 ;; esac' ERR
+# The command must fail. `! command` would not stop the run under set -e.
+refute() {
+	local message="$1"
+	shift
+	if "$@"; then
+		fail "${message}"
+	fi
+}
+lacks() { refute "unexpected match: $*" rg "$@"; }
+# The default fixture environment, inside one isolated home.
+in_home() {
+	local home="$1"
+	shift
+	HOME="${home}" XDG_CONFIG_HOME="${home}/.config" XDG_DATA_HOME="${home}/.local/share" \
+		PATH="${test_path}" "$@"
+}
+fake_exec() {
+	printf '#!/bin/sh\n%s\n' "$2" >"$1"
+	chmod +x "$1"
+}
+# A CLAUDE.md the user wrote, which Kilo and OpenCode may read instead of their own file.
+claude_notes() {
+	mkdir -p "$1/.claude"
+	printf 'my claude notes\n' >"$1/.claude/CLAUDE.md"
+}
+# The instruction files a user already has. Grok, Qwen, and Cline sit where their
+# variables point, which differs between the fixtures.
+seed_user_files() {
+	local home="$1" grok="$2" qwen="$3" cline="$4"
+	mkdir -p "${home}/.claude" "${home}/.codex" "${home}/.gemini" "${home}/.copilot" "${home}/.cursor" \
+		"${home}/${grok}/rules" "${home}/${qwen}" "${home}/${cline}/rules" "${home}/.config/opencode" \
+		"${home}/.config/kilo" "${home}/.config/crush" "${home}/.config/goose" "${home}/.dsh" \
+		"${home}/.pi/agent" "${home}/dotfiles"
+	printf 'user claude\n' >"${home}/dotfiles/CLAUDE.md"
+	ln -s ../dotfiles/CLAUDE.md "${home}/.claude/CLAUDE.md"
+	printf 'user codex\n' >"${home}/.codex/AGENTS.md"
+	printf 'user gemini\n' >"${home}/.gemini/GEMINI.md"
+	printf 'user copilot\n' >"${home}/.copilot/copilot-instructions.md"
+	printf 'user grok\n' >"${home}/${grok}/rules/agent-ready.md"
+	printf 'user opencode\n' >"${home}/.config/opencode/AGENTS.md"
+	printf 'user qwen\n' >"${home}/${qwen}/QWEN.md"
+	printf 'user cline\n' >"${home}/${cline}/rules/agent-ready.md"
+	printf 'user kilo\n' >"${home}/.config/kilo/AGENTS.md"
+	printf 'user crush\n' >"${home}/.config/crush/CRUSH.md"
+	printf 'user goose\n' >"${home}/.config/goose/AGENTS.md"
+	printf 'user dsh\n' >"${home}/.dsh/AGENTS.md"
+	printf 'user pi\n' >"${home}/.pi/agent/AGENTS.md"
+	cat >"${home}/.cursor/hooks.json" <<'EOF'
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [{"command": "./hooks/existing.sh"}],
+    "stop": [{"command": "./hooks/stop.sh"}]
+  }
+}
+EOF
+}
+
 digest_stdin() {
 	if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
 }
@@ -31,8 +102,7 @@ test_path="${fake_bin}:${PATH}"
 mkdir -p "${fake_home}" "${fake_bin}"
 
 for command in claude codex cursor-agent gemini agy copilot windsurf grok opencode qwen cline kilo crush goose dsh pi; do
-	printf '#!/bin/sh\nexit 0\n' >"${fake_bin}/${command}"
-	chmod +x "${fake_bin}/${command}"
+	fake_exec "${fake_bin}/${command}" 'exit 0'
 done
 cat >"${fake_bin}/rtk" <<'EOF'
 #!/bin/sh
@@ -57,50 +127,12 @@ printf '%s\n' "$*" >>"${HOME}/brew-calls"
 EOF
 chmod +x "${fake_bin}/brew"
 
-mkdir -p \
-	"${fake_home}/.claude" \
-	"${fake_home}/.codex" \
-	"${fake_home}/.gemini" \
-	"${fake_home}/.copilot" \
-	"${fake_home}/.cursor" \
-	"${fake_home}/grok-home/rules" \
-	"${fake_home}/qwen-home" \
-	"${fake_home}/cline-home/rules" \
-	"${fake_home}/.config/opencode" \
-	"${fake_home}/.config/kilo" \
-	"${fake_home}/.config/crush" \
-	"${fake_home}/.config/goose" \
-	"${fake_home}/.dsh" \
-	"${fake_home}/.pi/agent" \
-	"${fake_home}/dotfiles"
-printf 'user claude\n' >"${fake_home}/dotfiles/CLAUDE.md"
-ln -s ../dotfiles/CLAUDE.md "${fake_home}/.claude/CLAUDE.md"
-printf 'user codex\n' >"${fake_home}/.codex/AGENTS.md"
-printf 'user gemini\n' >"${fake_home}/.gemini/GEMINI.md"
-printf 'user copilot\n' >"${fake_home}/.copilot/copilot-instructions.md"
-printf 'user grok\n' >"${fake_home}/grok-home/rules/agent-ready.md"
-printf 'user opencode\n' >"${fake_home}/.config/opencode/AGENTS.md"
-printf 'user qwen\n' >"${fake_home}/qwen-home/QWEN.md"
-printf 'user cline\n' >"${fake_home}/cline-home/rules/agent-ready.md"
-printf 'user kilo\n' >"${fake_home}/.config/kilo/AGENTS.md"
-printf 'user crush\n' >"${fake_home}/.config/crush/CRUSH.md"
-printf 'user goose\n' >"${fake_home}/.config/goose/AGENTS.md"
-printf 'user dsh\n' >"${fake_home}/.dsh/AGENTS.md"
-printf 'user pi\n' >"${fake_home}/.pi/agent/AGENTS.md"
+seed_user_files "${fake_home}" grok-home qwen-home cline-home
 cat >"${fake_home}/.cursor/AGENTS.md" <<EOF
 user cursor
 <!-- agent-ready:start -->
 old routing
 <!-- agent-ready:end -->
-EOF
-cat >"${fake_home}/.cursor/hooks.json" <<'EOF'
-{
-  "version": 1,
-  "hooks": {
-    "sessionStart": [{"command": "./hooks/existing.sh"}],
-    "stop": [{"command": "./hooks/stop.sh"}]
-  }
-}
 EOF
 
 version=$(cat "${root}/VERSION")
@@ -144,10 +176,7 @@ block_body() {
 check_headers() {
 	local target
 	for target in "${block_targets[@]}"; do
-		[ "$(block_header "${target}")" = "<!-- agent-ready ${version} sha256:$(block_body "${target}" | digest_stdin) -->" ] || {
-			printf 'block header is missing or has the wrong hash in %s\n' "${target}" >&2
-			exit 1
-		}
+		[ "$(block_header "${target}")" = "<!-- agent-ready ${version} sha256:$(block_body "${target}" | digest_stdin) -->" ] || fail "block header is missing or has the wrong hash in ${target}"
 	done
 }
 snapshot_targets() {
@@ -183,11 +212,7 @@ run_install() {
 }
 
 run_tool_install() {
-	HOME="${fake_home}" \
-	XDG_CONFIG_HOME="${fake_home}/.config" \
-	PATH="${test_path}" \
-	CODEX_HOME="${fake_home}/.codex" \
-		"${root}/bootstrap.sh" --agent codex "$@" >/dev/null
+	CODEX_HOME="${fake_home}/.codex" in_home "${fake_home}" "${root}/bootstrap.sh" --agent codex "$@" >/dev/null
 }
 
 run_install
@@ -195,31 +220,14 @@ snapshot_targets "${work}/after-first-run"
 run_install
 compare_targets "${work}/after-first-run"
 
-for target in \
-	"${fake_home}/.claude/CLAUDE.md" \
-	"${fake_home}/.codex/AGENTS.md" \
-	"${fake_home}/.gemini/GEMINI.md" \
-	"${fake_home}/.copilot/copilot-instructions.md" \
-	"${fake_home}/.devin/global_rules.md" \
-	"${fake_home}/grok-home/rules/agent-ready.md" \
-	"${fake_home}/.config/opencode/AGENTS.md" \
-	"${fake_home}/qwen-home/QWEN.md" \
-	"${fake_home}/cline-home/rules/agent-ready.md" \
-	"${fake_home}/.config/kilo/AGENTS.md" \
-	"${fake_home}/.config/crush/CRUSH.md" \
-	"${fake_home}/.config/goose/AGENTS.md" \
-	"${fake_home}/.dsh/AGENTS.md" \
-	"${fake_home}/.pi/agent/AGENTS.md"; do
+for target in "${block_targets[@]}"; do
 	[ "$(rg -c '^<!-- agent-ready:start -->$' "${target}")" -eq 1 ]
 	[ "$(rg -c '^<!-- agent-ready:end -->$' "${target}")" -eq 1 ]
 	rg -q '^Tool routing \(use instead of defaults\):$' "${target}"
 	case "${target}" in
 	*/.claude/* | */.codex/* | */.gemini/* | */opencode/*)
 		# `codegraph install` writes its own section into these files.
-		if rg -q '^- Code graph:' "${target}"; then
-			printf 'CodeGraph routing duplicated in %s\n' "${target}" >&2
-			exit 1
-		fi
+		refute "CodeGraph routing duplicated in ${target}" rg -q '^- Code graph:' "${target}"
 		;;
 	*)
 		rg -qF 'Code graph: index of symbols, calls, imports' "${target}"
@@ -227,19 +235,13 @@ for target in \
 		rg -qF 'never `codegraph init` unasked' "${target}"
 		;;
 	esac
-	if rg -q '^- Go:' "${target}"; then
-		printf 'generic install unexpectedly included Go routing in %s\n' "${target}" >&2
-		exit 1
-	fi
+	refute "generic install unexpectedly included Go routing in ${target}" rg -q '^- Go:' "${target}"
 done
 check_headers
 
 # The shared block is sent with every prompt; keep the CodeGraph line terse.
 graph_line=$(rg '^- Code graph:' "${fake_home}/.copilot/copilot-instructions.md")
-[ "${#graph_line}" -le 400 ] || {
-	printf 'CodeGraph routing line is %s characters; keep it under 400\n' "${#graph_line}" >&2
-	exit 1
-}
+[ "${#graph_line}" -le 400 ] || fail "CodeGraph routing line is ${#graph_line} characters; keep it under 400"
 # `build | tail` exits 0 on failure, and a missing edit target changes nothing silently.
 rg -qF "don't pipe them into \`tail\`/\`head\`; the pipe exits 0" "${fake_home}/.codex/AGENTS.md"
 rg -qF '`set -o pipefail` first' "${fake_home}/.codex/AGENTS.md"
@@ -257,10 +259,7 @@ rg -qF 'to compare commands, `hyperfine' "${fake_home}/.codex/AGENTS.md"
 # jq cannot edit in place, so agents rewrote JSON through Python; yq -i can.
 rg -qF '`yq -i` edits these and JSON in place' "${fake_home}/.codex/AGENTS.md"
 rg -qF '`osv-scanner scan source -r .` vulnerable dependencies' "${fake_home}/.codex/AGENTS.md"
-if rg -qF 'rtk proxy' "${fake_home}/.codex/AGENTS.md"; then
-	printf 'routing still names the deprecated rtk proxy\n' >&2
-	exit 1
-fi
+refute 'routing still names the deprecated rtk proxy' rg -qF 'rtk proxy' "${fake_home}/.codex/AGENTS.md"
 
 rg -q '^user claude$' "${fake_home}/.claude/CLAUDE.md"
 [ -L "${fake_home}/.claude/CLAUDE.md" ]
@@ -277,10 +276,7 @@ rg -q '^user goose$' "${fake_home}/.config/goose/AGENTS.md"
 rg -q '^user dsh$' "${fake_home}/.dsh/AGENTS.md"
 rg -q '^user pi$' "${fake_home}/.pi/agent/AGENTS.md"
 rg -q '^user cursor$' "${fake_home}/.cursor/AGENTS.md"
-if rg -q 'agent-ready:' "${fake_home}/.cursor/AGENTS.md"; then
-	printf 'legacy Cursor routing block was not removed\n' >&2
-	exit 1
-fi
+refute 'legacy Cursor routing block was not removed' rg -q 'agent-ready:' "${fake_home}/.cursor/AGENTS.md"
 
 jq -e '
 	.hooks.stop[0].command == "./hooks/stop.sh" and
@@ -325,10 +321,7 @@ dry_repeat=$(HOME="${fake_home}" XDG_CONFIG_HOME="${fake_home}/.config" PATH="${
 	"${root}/install.sh" --configure-only --dry-run)
 rg -q '^Codex: unchanged ' <<<"${dry_repeat}"
 rg -q '^Cursor: unchanged ' <<<"${dry_repeat}"
-if rg -q 'would add|would refresh|blocked' <<<"${dry_repeat}"; then
-	printf 'dry run of a configured machine reported pending changes\n' >&2
-	exit 1
-fi
+refute 'dry run of a configured machine reported pending changes' rg -q 'would add|would refresh|blocked' <<<"${dry_repeat}"
 
 for expected in \
 	'init -g --hook-only --auto-patch --no-trust-filters' \
@@ -351,10 +344,7 @@ snapshot_targets "${work}/after-edit"
 rtk_before=$(line_count "${fake_home}/rtk-calls")
 codegraph_before=$(line_count "${fake_home}/codegraph-calls")
 brew_before=$(line_count "${fake_home}/brew-calls")
-if edit_error=$(run_install 2>&1 >/dev/null); then
-	printf 'local edits inside the block unexpectedly succeeded\n' >&2
-	exit 1
-fi
+if edit_error=$(run_install 2>&1 >/dev/null); then fail 'local edits inside the block unexpectedly succeeded'; fi
 rg -qF 'has local edits inside the agent-ready block' <<<"${edit_error}"
 rg -qF "${fake_home}/.codex/AGENTS.md" <<<"${edit_error}"
 compare_targets "${work}/after-edit"
@@ -372,10 +362,7 @@ run_tool_install
 run_tool_install --upgrade
 rg -qF "bundle --no-upgrade --file ${root}/Brewfile" "${fake_home}/brew-calls"
 rg -qF "bundle --file ${root}/Brewfile" "${fake_home}/brew-calls"
-if run_tool_install --configure-only --upgrade >/dev/null 2>&1; then
-	printf 'conflicting install options unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'conflicting install options unexpectedly succeeded' run_tool_install --configure-only --upgrade >/dev/null 2>&1
 
 # A checkout bootstrap only runs the installer; the local command comes from a
 # verified release.
@@ -428,9 +415,7 @@ rg -qF 'install --yes --target=codex --location=global --no-permissions' "${targ
 
 targeted_cursor_home="${work}/targeted-cursor-home"
 mkdir -p "${targeted_cursor_home}"
-HOME="${targeted_cursor_home}" PATH="${test_path}" \
-XDG_CONFIG_HOME="${targeted_cursor_home}/.config" \
-	"${root}/bootstrap.sh" cursor --configure-only >/dev/null
+in_home "${targeted_cursor_home}" "${root}/bootstrap.sh" cursor --configure-only >/dev/null
 rg -qF 'init -g --agent cursor --hook-only --no-patch --no-trust-filters' \
 	"${targeted_cursor_home}/rtk-calls"
 [ ! -e "${targeted_cursor_home}/.claude" ]
@@ -440,9 +425,7 @@ rg -qF 'install --yes --target=cursor --location=global --no-permissions' "${tar
 
 targeted_opencode_home="${work}/targeted-opencode-home"
 mkdir -p "${targeted_opencode_home}"
-HOME="${targeted_opencode_home}" PATH="${test_path}" \
-XDG_CONFIG_HOME="${targeted_opencode_home}/.config" \
-	"${root}/bootstrap.sh" open-code --configure-only >/dev/null
+in_home "${targeted_opencode_home}" "${root}/bootstrap.sh" open-code --configure-only >/dev/null
 # Without --hook-only, `rtk init --opencode` also writes Claude Code's RTK.md.
 rg -qF 'init -g --opencode --hook-only --no-patch --no-trust-filters' "${targeted_opencode_home}/rtk-calls"
 rg -q '^Tool routing \(use instead of defaults\):$' "${targeted_opencode_home}/.config/opencode/AGENTS.md"
@@ -451,14 +434,9 @@ rg -qF 'install --yes --target=opencode --location=global --no-permissions' "${t
 
 targeted_windsurf_home="${work}/targeted-windsurf-home"
 mkdir -p "${targeted_windsurf_home}"
-HOME="${targeted_windsurf_home}" PATH="${test_path}" \
-	XDG_CONFIG_HOME="${targeted_windsurf_home}/.config" \
-	"${root}/bootstrap.sh" windsurf --configure-only >"${work}/windsurf.out" 2>&1
+in_home "${targeted_windsurf_home}" "${root}/bootstrap.sh" windsurf --configure-only >"${work}/windsurf.out" 2>&1
 rg -qF 'MCP setup is not available for windsurf' "${work}/windsurf.out"
-if rg -q '^install ' "${targeted_windsurf_home}/codegraph-calls"; then
-	printf 'unsupported CodeGraph target was wired anyway\n' >&2
-	exit 1
-fi
+refute 'unsupported CodeGraph target was wired anyway' rg -q '^install ' "${targeted_windsurf_home}/codegraph-calls"
 rg -qx 'telemetry off' "${targeted_windsurf_home}/codegraph-calls"
 rg -qF 'Code graph: index of symbols, calls, imports' "${targeted_windsurf_home}/.devin/global_rules.md"
 
@@ -493,12 +471,8 @@ jq -e '.keep and .mcpServers.existing.command == "existing"
 	and .mcpServers.gopls.command == "gopls" and .mcpServers.gopls.args == ["mcp"]' \
 	"${language_home}/.cursor/mcp.json" >/dev/null
 
-HOME="${language_home}" PATH="${test_path}" \
-	XDG_CONFIG_HOME="${language_home}/.config" \
-	"${root}/languages/go/install.sh" --agent cursor >/dev/null
-HOME="${language_home}" PATH="${test_path}" \
-	XDG_CONFIG_HOME="${language_home}/.config" \
-	"${root}/languages/go/install.sh" --agent cursor --upgrade >/dev/null
+in_home "${language_home}" "${root}/languages/go/install.sh" --agent cursor >/dev/null
+in_home "${language_home}" "${root}/languages/go/install.sh" --agent cursor --upgrade >/dev/null
 rg -qF "bundle --no-upgrade --file ${root}/languages/go/Brewfile" "${language_home}/brew-calls"
 rg -qF "bundle --file ${root}/languages/go/Brewfile" "${language_home}/brew-calls"
 
@@ -506,28 +480,17 @@ invalid_cursor_home="${work}/invalid-cursor-home"
 mkdir -p "${invalid_cursor_home}/.cursor"
 printf '{broken\n' >"${invalid_cursor_home}/.cursor/mcp.json"
 cp "${invalid_cursor_home}/.cursor/mcp.json" "${work}/invalid-cursor-before"
-if HOME="${invalid_cursor_home}" PATH="${test_path}" \
-	XDG_CONFIG_HOME="${invalid_cursor_home}/.config" \
-	"${root}/languages/go/install.sh" --agent cursor --configure-only >/dev/null 2>&1; then
-	printf 'invalid Cursor MCP config unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'invalid Cursor MCP config unexpectedly succeeded' in_home "${invalid_cursor_home}" "${root}/languages/go/install.sh" --agent cursor --configure-only >/dev/null 2>&1
 cmp -s "${work}/invalid-cursor-before" "${invalid_cursor_home}/.cursor/mcp.json"
 
 targeted_language_home="${work}/targeted-language-home"
 mkdir -p "${targeted_language_home}"
-HOME="${targeted_language_home}" PATH="${test_path}" \
-	XDG_CONFIG_HOME="${targeted_language_home}/.config" \
-	CODEX_HOME="${targeted_language_home}/.codex" \
-	"${root}/bootstrap.sh" language go --agent codex --configure-only >/dev/null
+CODEX_HOME="${targeted_language_home}/.codex" in_home "${targeted_language_home}" "${root}/bootstrap.sh" language go --agent codex --configure-only >/dev/null
 rg -qF 'use gopls where compiler semantics matter' "${targeted_language_home}/.codex/AGENTS.md"
 [ ! -e "${targeted_language_home}/.claude/CLAUDE.md" ]
 [ ! -e "${targeted_language_home}/.cursor/hooks.json" ]
 
-if "${root}/bootstrap.sh" language unknown --configure-only >/dev/null 2>&1; then
-	printf 'unknown language unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'unknown language unexpectedly succeeded' "${root}/bootstrap.sh" language unknown --configure-only >/dev/null 2>&1
 
 # Without CodeGraph on PATH nothing else describes it, so the line stays.
 no_graph_home="${work}/no-graph-home"
@@ -558,10 +521,7 @@ cp "${malformed_home}/.claude/CLAUDE.md" "${work}/before"
 if HOME="${malformed_home}" PATH="${malformed_bin}:${PATH}" \
 	XDG_CONFIG_HOME="${malformed_home}/.config" \
 	CLAUDE_CONFIG_DIR="${malformed_home}/.claude" \
-	"${root}/install.sh" --configure-only >/dev/null 2>&1; then
-	printf 'malformed markers unexpectedly succeeded\n' >&2
-	exit 1
-fi
+	"${root}/install.sh" --configure-only >/dev/null 2>&1; then fail 'malformed markers unexpectedly succeeded'; fi
 cmp -s "${work}/before" "${malformed_home}/.claude/CLAUDE.md"
 
 # Cursor is preflighted through hooks.json and its legacy AGENTS.md block.
@@ -569,11 +529,7 @@ bad_hooks_home="${work}/bad-hooks-home"
 mkdir -p "${bad_hooks_home}/.cursor"
 printf '{broken\n' >"${bad_hooks_home}/.cursor/hooks.json"
 cp "${bad_hooks_home}/.cursor/hooks.json" "${work}/bad-hooks-before"
-if HOME="${bad_hooks_home}" XDG_CONFIG_HOME="${bad_hooks_home}/.config" PATH="${test_path}" \
-	"${root}/install.sh" --agent cursor --configure-only >"${work}/bad-hooks.out" 2>&1; then
-	printf 'an invalid hooks.json unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'an invalid hooks.json unexpectedly succeeded' in_home "${bad_hooks_home}" "${root}/install.sh" --agent cursor --configure-only >"${work}/bad-hooks.out" 2>&1
 rg -qF 'hooks.json must be a JSON object' "${work}/bad-hooks.out"
 cmp -s "${work}/bad-hooks-before" "${bad_hooks_home}/.cursor/hooks.json"
 [ ! -e "${bad_hooks_home}/.cursor/hooks/agent-ready-session-start.json" ]
@@ -584,11 +540,7 @@ bad_legacy_home="${work}/bad-legacy-home"
 mkdir -p "${bad_legacy_home}/.cursor"
 printf 'user cursor\n<!-- agent-ready:start -->\nbroken\n' >"${bad_legacy_home}/.cursor/AGENTS.md"
 cp "${bad_legacy_home}/.cursor/AGENTS.md" "${work}/bad-legacy-before"
-if HOME="${bad_legacy_home}" XDG_CONFIG_HOME="${bad_legacy_home}/.config" PATH="${test_path}" \
-	"${root}/install.sh" --agent cursor --configure-only >"${work}/bad-legacy.out" 2>&1; then
-	printf 'malformed legacy Cursor markers unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'malformed legacy Cursor markers unexpectedly succeeded' in_home "${bad_legacy_home}" "${root}/install.sh" --agent cursor --configure-only >"${work}/bad-legacy.out" 2>&1
 rg -qF 'malformed agent-ready markers in ' "${work}/bad-legacy.out"
 rg -qF "${bad_legacy_home}/.cursor/AGENTS.md" "${work}/bad-legacy.out"
 cmp -s "${work}/bad-legacy-before" "${bad_legacy_home}/.cursor/AGENTS.md"
@@ -605,14 +557,9 @@ user codex
 old routing written by v1.2.0
 <!-- agent-ready:end -->
 EOF
-HOME="${legacy_home}" XDG_CONFIG_HOME="${legacy_home}/.config" \
-	CODEX_HOME="${legacy_home}/.codex" PATH="${test_path}" \
-	"${root}/install.sh" --agent codex --configure-only >/dev/null
+CODEX_HOME="${legacy_home}/.codex" in_home "${legacy_home}" "${root}/install.sh" --agent codex --configure-only >/dev/null
 rg -q '^user codex$' "${legacy_home}/.codex/AGENTS.md"
-if rg -qF 'old routing written by v1.2.0' "${legacy_home}/.codex/AGENTS.md"; then
-	printf 'legacy block was not refreshed\n' >&2
-	exit 1
-fi
+refute 'legacy block was not refreshed' rg -qF 'old routing written by v1.2.0' "${legacy_home}/.codex/AGENTS.md"
 [ "$(block_header "${legacy_home}/.codex/AGENTS.md")" = \
 	"<!-- agent-ready ${version} sha256:$(block_body "${legacy_home}/.codex/AGENTS.md" | digest_stdin) -->" ]
 
@@ -625,11 +572,9 @@ cp -R "${root}/." "${truncated_tree}/"
 routing_size=$(wc -c <"${truncated_tree}/agent-routing.md" | tr -d ' ')
 head -c "$((routing_size - 1))" "${truncated_tree}/agent-routing.md" >"${truncated_tree}/agent-routing.tmp"
 mv "${truncated_tree}/agent-routing.tmp" "${truncated_tree}/agent-routing.md"
-HOME="${truncated_home}" XDG_CONFIG_HOME="${truncated_home}/.config" PATH="${test_path}" \
-	"${truncated_tree}/install.sh" --agent goose --configure-only >/dev/null 2>"${work}/truncated.err"
+in_home "${truncated_home}" "${truncated_tree}/install.sh" --agent goose --configure-only >/dev/null 2>"${work}/truncated.err"
 cp "${truncated_home}/.config/goose/AGENTS.md" "${work}/truncated-first"
-HOME="${truncated_home}" XDG_CONFIG_HOME="${truncated_home}/.config" PATH="${test_path}" \
-	"${truncated_tree}/install.sh" --agent goose --configure-only >/dev/null 2>"${work}/truncated.err"
+in_home "${truncated_home}" "${truncated_tree}/install.sh" --agent goose --configure-only >/dev/null 2>"${work}/truncated.err"
 cmp -s "${work}/truncated-first" "${truncated_home}/.config/goose/AGENTS.md"
 rg -q '^<!-- agent-ready:end -->$' "${truncated_home}/.config/goose/AGENTS.md"
 
@@ -644,12 +589,7 @@ user goose
 broken goose block
 EOF
 codex_before=$(digest_of "${late_home}/.codex/AGENTS.md")
-if HOME="${late_home}" XDG_CONFIG_HOME="${late_home}/.config" PATH="${test_path}" \
-	CODEX_HOME="${late_home}/.codex" \
-	"${root}/install.sh" --configure-only >"${work}/late.out" 2>&1; then
-	printf 'malformed markers for a late agent unexpectedly succeeded\n' >&2
-	exit 1
-fi
+if CODEX_HOME="${late_home}/.codex" in_home "${late_home}" "${root}/install.sh" --configure-only >"${work}/late.out" 2>&1; then fail 'malformed markers for a late agent unexpectedly succeeded'; fi
 rg -qF 'malformed agent-ready markers' "${work}/late.out"
 [ "$(digest_of "${late_home}/.codex/AGENTS.md")" = "${codex_before}" ]
 [ ! -e "${late_home}/.claude/CLAUDE.md" ]
@@ -670,24 +610,14 @@ rg -q '^Claude Code: would add ' <<<"${dry_out}"
 rg -q '^Codex: would add ' <<<"${dry_out}"
 rg -q '^Cursor: would add ' <<<"${dry_out}"
 [ -z "$(ls -A "${dry_home}")" ]
-if HOME="${dry_home}" PATH="${test_path}" XDG_CONFIG_HOME="${dry_home}/.config" \
-	"${root}/install.sh" --dry-run --upgrade >/dev/null 2>&1; then
-	printf -- '--dry-run --upgrade unexpectedly succeeded\n' >&2
-	exit 1
-fi
-if HOME="${dry_home}" PATH="${test_path}" XDG_CONFIG_HOME="${dry_home}/.config" \
-	"${root}/install.sh" --dry-run --binaries >/dev/null 2>&1; then
-	printf -- '--dry-run --binaries unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute '--dry-run --upgrade unexpectedly succeeded' in_home "${dry_home}" "${root}/install.sh" --dry-run --upgrade >/dev/null 2>&1
+refute '--dry-run --binaries unexpectedly succeeded' in_home "${dry_home}" "${root}/install.sh" --dry-run --binaries >/dev/null 2>&1
 
 # Explicit agents accumulate in the receipt instead of replacing each other.
 explicit_home="${work}/explicit-home"
 mkdir -p "${explicit_home}"
 for explicit_agent in codex claude; do
-	HOME="${explicit_home}" XDG_CONFIG_HOME="${explicit_home}/.config" PATH="${test_path}" \
-		CODEX_HOME="${explicit_home}/.codex" CLAUDE_CONFIG_DIR="${explicit_home}/.claude" \
-		"${root}/install.sh" --agent "${explicit_agent}" --configure-only >/dev/null
+	CODEX_HOME="${explicit_home}/.codex" CLAUDE_CONFIG_DIR="${explicit_home}/.claude" in_home "${explicit_home}" "${root}/install.sh" --agent "${explicit_agent}" --configure-only >/dev/null
 done
 explicit_receipt="${explicit_home}/.config/agent-ready/receipt"
 rg -qx 'agents=claude,codex' "${explicit_receipt}"
@@ -698,13 +628,9 @@ rg -qx 'languages=' "${explicit_receipt}"
 # --configure-only keeps the tool path the machine was installed with.
 tools_home="${work}/tools-home"
 mkdir -p "${tools_home}"
-HOME="${tools_home}" XDG_CONFIG_HOME="${tools_home}/.config" PATH="${test_path}" \
-	CODEX_HOME="${tools_home}/.codex" \
-	"${root}/install.sh" --agent codex >/dev/null
+CODEX_HOME="${tools_home}/.codex" in_home "${tools_home}" "${root}/install.sh" --agent codex >/dev/null
 rg -qx 'tools=brew' "${tools_home}/.config/agent-ready/receipt"
-HOME="${tools_home}" XDG_CONFIG_HOME="${tools_home}/.config" PATH="${test_path}" \
-	CODEX_HOME="${tools_home}/.codex" \
-	"${root}/install.sh" --agent codex --configure-only >/dev/null
+CODEX_HOME="${tools_home}/.codex" in_home "${tools_home}" "${root}/install.sh" --agent codex --configure-only >/dev/null
 rg -qx 'tools=brew' "${tools_home}/.config/agent-ready/receipt"
 rg -qx 'agents=codex' "${tools_home}/.config/agent-ready/receipt"
 
@@ -713,9 +639,7 @@ empty_configured_home="${work}/empty-configured-home"
 mkdir -p "${empty_configured_home}/.config/agent-ready"
 printf 'schema=1\nversion=%s\nagents=codex\nconfigured=\nlanguages=\ntools=brew\nupdated_at=2024-01-01T00:00:00Z\n' \
 	"${version}" >"${empty_configured_home}/.config/agent-ready/receipt"
-HOME="${empty_configured_home}" XDG_CONFIG_HOME="${empty_configured_home}/.config" PATH="${test_path}" \
-	CODEX_HOME="${empty_configured_home}/.codex" \
-	"${root}/install.sh" --agent codex --configure-only >/dev/null
+CODEX_HOME="${empty_configured_home}/.codex" in_home "${empty_configured_home}" "${root}/install.sh" --agent codex --configure-only >/dev/null
 rg -qx 'configured=codex' "${empty_configured_home}/.config/agent-ready/receipt"
 rg -qx 'tools=brew' "${empty_configured_home}/.config/agent-ready/receipt"
 
@@ -735,12 +659,7 @@ updated_at=2024-01-01T00:00:00Z
 EOF
 cp "${bad_receipt_home}/.codex/AGENTS.md" "${work}/bad-receipt-codex"
 cp "${bad_receipt_home}/.config/agent-ready/receipt" "${work}/bad-receipt-before"
-if HOME="${bad_receipt_home}" XDG_CONFIG_HOME="${bad_receipt_home}/.config" PATH="${test_path}" \
-	CODEX_HOME="${bad_receipt_home}/.codex" \
-	"${root}/install.sh" --agent codex --configure-only >"${work}/bad-receipt.out" 2>&1; then
-	printf 'a malformed receipt unexpectedly succeeded\n' >&2
-	exit 1
-fi
+if CODEX_HOME="${bad_receipt_home}/.codex" in_home "${bad_receipt_home}" "${root}/install.sh" --agent codex --configure-only >"${work}/bad-receipt.out" 2>&1; then fail 'a malformed receipt unexpectedly succeeded'; fi
 rg -qF 'malformed agent-ready receipt' "${work}/bad-receipt.out"
 cmp -s "${work}/bad-receipt-before" "${bad_receipt_home}/.config/agent-ready/receipt"
 cmp -s "${work}/bad-receipt-codex" "${bad_receipt_home}/.codex/AGENTS.md"
@@ -917,9 +836,9 @@ expected_bins="jq rtk uv uvx sd rg ast-grep gh wt git-wt gitleaks actionlint she
 
 run_binaries >"${work}/binaries.out"
 for bin in ${expected_bins}; do
-	[ -x "${bins}/${bin}" ] || { printf 'binary install did not provide %s\n' "${bin}" >&2; exit 1; }
+	[ -x "${bins}/${bin}" ] || fail "binary install did not provide ${bin}"
 done
-[ ! -e "${bins}/sg" ] || { printf 'ast-grep installed sg, which shadows shadow-utils sg\n' >&2; exit 1; }
+[ ! -e "${bins}/sg" ] || fail 'ast-grep installed sg, which shadows shadow-utils sg'
 [ "$(wc -l <"${state}" | tr -d ' ')" -eq 16 ]
 rg -qx 'ripgrep 1.0.0' "${state}"
 rg -qF 'jq jq-1.0.0 installed' "${work}/binaries.out"
@@ -961,10 +880,7 @@ rg -qF 'ast-grep 1.0.0 installed' "${work}/binaries.out"
 [ -x "${bins}/ast-grep" ]
 jq -n '[{tag_name: "2.0.0", assets: []}]' >"${ag}.json"
 rm "${bins}/ast-grep"
-if run_binaries >"${work}/binaries.out" 2>&1; then
-	printf 'install without any matching release unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'install without any matching release unexpectedly succeeded' run_binaries >"${work}/binaries.out" 2>&1
 rg -qF 'ast-grep: no recent ast-grep/ast-grep release publishes a Linux x86_64 asset' "${work}/binaries.out"
 cp "${work}/ast-grep.json" "${ag}/latest"
 rm "${ag}.json"
@@ -975,10 +891,7 @@ jq '.assets[0].digest = "sha256:000000000000000000000000000000000000000000000000
 	"${gh_api}/repos/chmln/sd/releases/latest" >"${work}/sd.json"
 cp "${work}/sd.json" "${gh_api}/repos/chmln/sd/releases/latest"
 rm "${bins}/sd"
-if run_binaries >"${work}/binaries.out" 2>&1; then
-	printf 'checksum mismatch unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'checksum mismatch unexpectedly succeeded' run_binaries >"${work}/binaries.out" 2>&1
 rg -qF 'sd: checksum mismatch' "${work}/binaries.out"
 [ ! -e "${bins}/sd" ]
 publish_all 1.0.0
@@ -995,14 +908,10 @@ rg -qF 'mdq: no Linux aarch64 build is published upstream; skipped' "${work}/bin
 # as if it were the binary.
 rm -rf "${binary_home}"
 mkdir -p "${binary_home}" "${work}/broken-tar-bin"
-printf '#!/bin/sh\nexit 2\n' >"${work}/broken-tar-bin/tar"
-chmod +x "${work}/broken-tar-bin/tar"
+fake_exec "${work}/broken-tar-bin/tar" 'exit 2'
 if HOME="${binary_home}" PATH="${work}/broken-tar-bin:${base_bin}" XDG_CONFIG_HOME="${binary_home}/.config" \
 	AGENT_READY_ARCH=x86_64 AGENT_READY_GITHUB_API="file://${gh_api}" \
-	"${root}/install-binaries.sh" >"${work}/binaries.out" 2>&1; then
-	printf 'install-binaries.sh unexpectedly succeeded with a failing tar\n' >&2
-	exit 1
-fi
+	"${root}/install-binaries.sh" >"${work}/binaries.out" 2>&1; then fail 'install-binaries.sh unexpectedly succeeded with a failing tar'; fi
 rg -qF 'could not unpack' "${work}/binaries.out"
 [ ! -e "${bins}/rtk" ]
 lacks_rtk_tag=$(awk '$1 == "rtk"' "${state}")
@@ -1024,21 +933,14 @@ HOME="${brew_home}" PATH="${fake_bin}:${base_bin}" XDG_CONFIG_HOME="${brew_home}
 [ -x "${brew_home}/.local/bin/rg" ]
 [ "$(wc -l <"${brew_home}/brew-calls" | tr -d ' ')" -eq 1 ]
 if HOME="${brew_home}" PATH="${test_path}" AGENT_READY_OS=Darwin \
-	"${root}/install.sh" --agent codex --binaries >/dev/null 2>&1; then
-	printf -- '--binaries unexpectedly succeeded on macOS\n' >&2
-	exit 1
-fi
-if HOME="${brew_home}" PATH="${test_path}" "${root}/install.sh" --configure-only --binaries >/dev/null 2>&1; then
-	printf -- '--configure-only --binaries unexpectedly succeeded\n' >&2
-	exit 1
-fi
+	"${root}/install.sh" --agent codex --binaries >/dev/null 2>&1; then fail '--binaries unexpectedly succeeded on macOS'; fi
+refute '--configure-only --binaries unexpectedly succeeded' in_home "${brew_home}" "${root}/install.sh" --configure-only --binaries >/dev/null 2>&1
 
 # macOS: coreutils installs `gtimeout`; `timeout` is linked only where none exists.
 mac_home="${work}/brew-mac-home"
 mac_bin="${work}/mac-bin"
 mkdir -p "${mac_home}" "${mac_bin}"
-printf '#!/bin/sh\nexit 0\n' >"${mac_bin}/gtimeout"
-chmod +x "${mac_bin}/gtimeout"
+fake_exec "${mac_bin}/gtimeout" 'exit 0'
 run_mac() {
 	HOME="${mac_home}" PATH="${mac_bin}:${fake_bin}:${base_bin}" XDG_CONFIG_HOME="${mac_home}/.config" \
 		CODEX_HOME="${mac_home}/.codex" AGENT_READY_OS=Darwin \
@@ -1119,10 +1021,7 @@ jq --arg name "codegraph-linux-x64.tar.gz" \
 	"${gh_api}/repos/colbymchenry/codegraph/releases/latest" >"${work}/codegraph.json"
 cp "${work}/codegraph.json" "${gh_api}/repos/colbymchenry/codegraph/releases/latest"
 rm -f "${cg_bins}/codegraph" "${cg_state}"
-if run_codegraph >"${work}/codegraph.out" 2>&1; then
-	printf 'codegraph checksum mismatch unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'codegraph checksum mismatch unexpectedly succeeded' run_codegraph >"${work}/codegraph.out" 2>&1
 rg -qF 'codegraph: checksum mismatch' "${work}/codegraph.out"
 [ ! -e "${cg_bins}/codegraph" ]
 publish_codegraph v9.10.0
@@ -1130,8 +1029,7 @@ publish_codegraph v9.10.0
 # A codegraph installed by npm or upstream is left in place, not shadowed.
 kept_home="${work}/codegraph-kept-home"
 mkdir -p "${kept_home}/.local/bin"
-printf '#!/bin/sh\nexit 0\n' >"${kept_home}/.local/bin/codegraph"
-chmod +x "${kept_home}/.local/bin/codegraph"
+fake_exec "${kept_home}/.local/bin/codegraph" 'exit 0'
 cp "${kept_home}/.local/bin/codegraph" "${work}/codegraph-kept-before"
 HOME="${kept_home}" PATH="${test_path}" XDG_CONFIG_HOME="${kept_home}/.config" \
 	AGENT_READY_OS=Linux AGENT_READY_ARCH=x86_64 AGENT_READY_GITHUB_API="file://${gh_api}" \
@@ -1141,10 +1039,7 @@ cmp -s "${work}/codegraph-kept-before" "${kept_home}/.local/bin/codegraph"
 
 if HOME="${cg_home}" PATH="${test_path}" XDG_CONFIG_HOME="${cg_home}/.config" \
 	AGENT_READY_OS=Linux AGENT_READY_ARCH=riscv64 AGENT_READY_GITHUB_API="file://${gh_api}" \
-	"${root}/install-codegraph.sh" >"${work}/codegraph.out" 2>&1; then
-	printf 'unsupported architecture unexpectedly succeeded\n' >&2
-	exit 1
-fi
+	"${root}/install-codegraph.sh" >"${work}/codegraph.out" 2>&1; then fail 'unsupported architecture unexpectedly succeeded'; fi
 rg -qF 'unsupported architecture: riscv64' "${work}/codegraph.out"
 
 # bootstrap.sh verifies a release archive against the digest GitHub records
@@ -1187,10 +1082,7 @@ mkdir -p "${wrong_digest_home}"
 jq '.assets[0].digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
 	"${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.9" >"${work}/agent-ready.json"
 cp "${work}/agent-ready.json" "${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.9"
-if run_bootstrap "${wrong_digest_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1; then
-	printf 'bootstrap checksum mismatch unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'bootstrap checksum mismatch unexpectedly succeeded' run_bootstrap "${wrong_digest_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1
 rg -qF 'checksum mismatch for agent-ready-v9.9.9.tar.gz; nothing installed' "${work}/bootstrap.out"
 [ ! -e "${wrong_digest_home}/.local" ]
 [ ! -e "${wrong_digest_home}/.config/agent-ready/receipt" ]
@@ -1199,10 +1091,7 @@ rg -qF 'checksum mismatch for agent-ready-v9.9.9.tar.gz; nothing installed' "${w
 no_asset_home="${work}/no-asset-home"
 mkdir -p "${no_asset_home}"
 jq -n '{tag_name: "v9.9.9", assets: []}' >"${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.9"
-if run_bootstrap "${no_asset_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1; then
-	printf 'bootstrap without a release archive unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'bootstrap without a release archive unexpectedly succeeded' run_bootstrap "${no_asset_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1
 rg -qF 'agent-ready v9.9.9 has no verified release archive; use a newer release' "${work}/bootstrap.out"
 [ ! -e "${no_asset_home}/.local" ]
 
@@ -1210,10 +1099,7 @@ rg -qF 'agent-ready v9.9.9 has no verified release archive; use a newer release'
 version_home="${work}/version-home"
 mkdir -p "${version_home}"
 publish_agent_ready v9.9.9 v9.9.8
-if run_bootstrap "${version_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1; then
-	printf 'bootstrap with a mismatched VERSION unexpectedly succeeded\n' >&2
-	exit 1
-fi
+refute 'bootstrap with a mismatched VERSION unexpectedly succeeded' run_bootstrap "${version_home}" "${test_path}" >"${work}/bootstrap.out" 2>&1
 rg -qF 'agent-ready v9.9.9: archive VERSION does not match the tag' "${work}/bootstrap.out"
 [ ! -e "${version_home}/.local" ]
 publish_agent_ready v9.9.9
@@ -1301,10 +1187,7 @@ rg -q '^Codex: unchanged ' "${work}/status.out"
 receipt_before=$(digest_of "${cli_home}/.config/agent-ready/receipt")
 agent_before=$(digest_of "${cli_home}/.codex/AGENTS.md")
 rtk_before=$(line_count "${cli_home}/rtk-calls")
-if run_cli "${cli_home}" "${cli_bins}" "${cli_path}" doctor >"${work}/doctor.out" 2>&1; then
-	printf 'doctor passed in a HOME without the tools\n' >&2
-	exit 1
-fi
+refute 'doctor passed in a HOME without the tools' run_cli "${cli_home}" "${cli_bins}" "${cli_path}" doctor >"${work}/doctor.out" 2>&1
 rg -qF 'ok: launcher ' "${work}/doctor.out"
 rg -qF 'ok: receipt ' "${work}/doctor.out"
 rg -qF "ok: ${cli_bins} is on PATH" "${work}/doctor.out"
@@ -1327,8 +1210,7 @@ rg -qF 'usage: ' "${work}/usage.out"
 # records the whole list as one entry.
 multi_home="${work}/multi-home"
 mkdir -p "${multi_home}"
-HOME="${multi_home}" PATH="${test_path}" XDG_CONFIG_HOME="${multi_home}/.config" \
-	"${root}/install.sh" --agent claude,codex --configure-only >/dev/null
+in_home "${multi_home}" "${root}/install.sh" --agent claude,codex --configure-only >/dev/null
 rg -q '^Tool routing \(use instead of defaults\):$' "${multi_home}/.claude/CLAUDE.md"
 rg -q '^Tool routing \(use instead of defaults\):$' "${multi_home}/.codex/AGENTS.md"
 rg -qx 'agents=claude,codex' "${multi_home}/.config/agent-ready/receipt"
@@ -1355,9 +1237,7 @@ done
 # unsupported agent is reported without blocking the others.
 alias_home="${work}/alias-home"
 mkdir -p "${alias_home}"
-HOME="${alias_home}" PATH="${test_path}" XDG_CONFIG_HOME="${alias_home}/.config" \
-	"${root}/install.sh" --agent claude-code,github-copilot,windsurf --configure-only \
-	>"${work}/alias.out" 2>&1
+in_home "${alias_home}" "${root}/install.sh" --agent claude-code,github-copilot,windsurf --configure-only >"${work}/alias.out" 2>&1
 rg -qx 'agents=claude,copilot,windsurf' "${alias_home}/.config/agent-ready/receipt"
 rg -qxF 'install --yes --target=claude,copilot-cli --location=global --no-permissions' \
 	"${alias_home}/codegraph-calls"
@@ -1369,15 +1249,13 @@ rg -q '^Tool routing \(use instead of defaults\):$' "${alias_home}/.devin/global
 # auto cannot join a list, and an empty item is not an agent.
 for bad_agents in claude,auto claude,,codex; do
 	bad_status=0
-	HOME="${multi_home}" PATH="${test_path}" XDG_CONFIG_HOME="${multi_home}/.config" \
-		"${root}/install.sh" --agent "${bad_agents}" --configure-only >/dev/null 2>&1 ||
+	in_home "${multi_home}" "${root}/install.sh" --agent "${bad_agents}" --configure-only >/dev/null 2>&1 ||
 		bad_status=$?
 	[ "${bad_status}" -eq 2 ]
 done
 
 # A later list joins the recorded explicit list instead of replacing it.
-HOME="${multi_home}" PATH="${test_path}" XDG_CONFIG_HOME="${multi_home}/.config" \
-	"${root}/install.sh" --agent codex,gemini --configure-only >/dev/null
+in_home "${multi_home}" "${root}/install.sh" --agent codex,gemini --configure-only >/dev/null
 rg -qx 'agents=claude,codex,gemini' "${multi_home}/.config/agent-ready/receipt"
 rg -qx 'configured=claude,codex,gemini' "${multi_home}/.config/agent-ready/receipt"
 
@@ -1418,8 +1296,7 @@ rg -qF 'no earlier version is kept; run agent-ready update v9.9.0' "${work}/roll
 foreign_home="${work}/foreign-home"
 foreign_bins="${work}/foreign-bin"
 mkdir -p "${foreign_home}" "${foreign_bins}"
-printf '#!/bin/sh\nexit 0\n' >"${foreign_bins}/agent-ready"
-chmod +x "${foreign_bins}/agent-ready"
+fake_exec "${foreign_bins}/agent-ready" 'exit 0'
 cp "${foreign_bins}/agent-ready" "${work}/foreign-before"
 run_release "${foreign_home}" "${foreign_bins}" v9.9.0 "${base_bin}" codex --configure-only \
 	>"${work}/foreign.out"
@@ -1438,11 +1315,8 @@ user codex
 broken block
 EOF
 cp "${fail_home}/.codex/AGENTS.md" "${work}/cli-fail-before"
-if run_release "${fail_home}" "${fail_bins}" v9.9.0 "${base_bin}" codex --configure-only \
-	>"${work}/cli-fail.out" 2>&1; then
-	printf 'a failing install self-installed\n' >&2
-	exit 1
-fi
+refute 'a failing install self-installed' run_release "${fail_home}" "${fail_bins}" v9.9.0 "${base_bin}" codex --configure-only \
+	>"${work}/cli-fail.out" 2>&1
 rg -qF 'malformed agent-ready markers' "${work}/cli-fail.out"
 cmp -s "${work}/cli-fail-before" "${fail_home}/.codex/AGENTS.md"
 [ ! -e "${fail_home}/.local" ]
@@ -1537,22 +1411,22 @@ for untouched in \
 done
 # A configure-only receipt stays configure-only, and nothing upgrades a tool.
 [ ! -e "${update_home}/brew-calls" ]
-if rg -q -- '--upgrade' "${update_home}/rtk-calls"; then
-	printf 'update upgraded a tool without --upgrade-tools\n' >&2
-	exit 1
-fi
+refute 'update upgraded a tool without --upgrade-tools' rg -q -- '--upgrade' "${update_home}/rtk-calls"
 
 # Nothing newer is left, so a second update changes no byte and does not run the
 # migration again.
 rm -f "${update_home}/migration-marker"
+update_left_alone() {
+	[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
+	[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
+	[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+}
 agent_before=$(digest_of "${update_home}/.codex/AGENTS.md")
 receipt_before=$(digest_of "${update_home}/.config/agent-ready/receipt")
 launcher_before=$(readlink "${update_bins}/agent-ready")
 run_update "${update_home}" "${update_bins}" 0 >"${work}/update.out"
 rg -qF 'agent-ready v9.9.2 is up to date' "${work}/update.out"
-[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
-[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
-[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+update_left_alone
 [ ! -e "${update_home}/migration-marker" ]
 
 # A release younger than the default 24 hours is skipped, so the installed
@@ -1589,9 +1463,7 @@ versions_before=$(find "${update_versions}" -mindepth 1 -maxdepth 1 -type d | so
 run_update "${update_home}" "${update_bins}" 0 --dry-run >"${work}/dry-run.out"
 rg -qF 'Updating agent-ready v9.9.1 → v9.9.2' "${work}/dry-run.out"
 rg -q '^Codex: would refresh ' "${work}/dry-run.out"
-[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
-[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
-[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+update_left_alone
 [ "$(find "${update_versions}" -mindepth 1 -maxdepth 1 -type d | sort | tr '\n' ' ')" = "${versions_before}" ]
 
 # A stale lock refuses the run before anything is resolved or changed.
@@ -1601,9 +1473,7 @@ run_update "${update_home}" "${update_bins}" 0 >"${work}/lock.out" 2>&1 || lock_
 [ "${lock_status}" -eq 1 ]
 rg -qF "another agent-ready update is running (remove ${update_home}/.config/agent-ready/update.lock if it is stale)" \
 	"${work}/lock.out"
-[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
-[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
-[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+update_left_alone
 rmdir "${update_home}/.config/agent-ready/update.lock"
 
 # A digest mismatch on the target stops the update with nothing replaced.
@@ -1615,9 +1485,7 @@ digest_status=0
 run_update "${update_home}" "${update_bins}" 0 >"${work}/digest.out" 2>&1 || digest_status=$?
 [ "${digest_status}" -eq 1 ]
 rg -qF 'checksum mismatch for agent-ready-v9.9.2.tar.gz; nothing installed' "${work}/digest.out"
-[ "$(digest_of "${update_home}/.codex/AGENTS.md")" = "${agent_before}" ]
-[ "$(digest_of "${update_home}/.config/agent-ready/receipt")" = "${receipt_before}" ]
-[ "$(readlink "${update_bins}/agent-ready")" = "${launcher_before}" ]
+update_left_alone
 cp "${work}/v9.9.2-tag.json" "${gh_api}/repos/Dankosik/agent-ready/releases/tags/v9.9.2"
 
 # Without a receipt (v1.3.0 or earlier) the tool mode is read from the machine
@@ -1709,38 +1577,9 @@ uninstall_home="${work}/uninstall-home"
 uninstall_bins="${work}/uninstall-bin"
 uninstall_versions="${uninstall_home}/.local/share/agent-ready/versions"
 uninstall_originals="${work}/uninstall-originals"
-mkdir -p "${uninstall_originals}" "${uninstall_home}/.claude" "${uninstall_home}/dotfiles" \
-	"${uninstall_home}/.codex" "${uninstall_home}/.gemini" "${uninstall_home}/.copilot" \
-	"${uninstall_home}/.grok/rules" "${uninstall_home}/.config/opencode" \
-	"${uninstall_home}/.qwen" "${uninstall_home}/.cline/rules" \
-	"${uninstall_home}/.config/kilo" "${uninstall_home}/.config/crush" \
-	"${uninstall_home}/.config/goose" "${uninstall_home}/.cursor" \
-	"${uninstall_home}/.dsh" "${uninstall_home}/.pi/agent" \
-	"${uninstall_home}/.config/agent-ready/languages" "${uninstall_bins}"
-printf 'user claude\n' >"${uninstall_home}/dotfiles/CLAUDE.md"
-ln -s ../dotfiles/CLAUDE.md "${uninstall_home}/.claude/CLAUDE.md"
-printf 'user codex\n' >"${uninstall_home}/.codex/AGENTS.md"
-printf 'user gemini\n' >"${uninstall_home}/.gemini/GEMINI.md"
-printf 'user copilot\n' >"${uninstall_home}/.copilot/copilot-instructions.md"
-printf 'user grok\n' >"${uninstall_home}/.grok/rules/agent-ready.md"
-printf 'user opencode\n' >"${uninstall_home}/.config/opencode/AGENTS.md"
-printf 'user qwen\n' >"${uninstall_home}/.qwen/QWEN.md"
-printf 'user cline\n' >"${uninstall_home}/.cline/rules/agent-ready.md"
-printf 'user kilo\n' >"${uninstall_home}/.config/kilo/AGENTS.md"
-printf 'user crush\n' >"${uninstall_home}/.config/crush/CRUSH.md"
-printf 'user goose\n' >"${uninstall_home}/.config/goose/AGENTS.md"
-printf 'user dsh\n' >"${uninstall_home}/.dsh/AGENTS.md"
-printf 'user pi\n' >"${uninstall_home}/.pi/agent/AGENTS.md"
+mkdir -p "${uninstall_originals}" "${uninstall_home}/.config/agent-ready/languages" "${uninstall_bins}"
+seed_user_files "${uninstall_home}" .grok .qwen .cline
 printf 'enabled\n' >"${uninstall_home}/.config/agent-ready/languages/go"
-cat >"${uninstall_home}/.cursor/hooks.json" <<'EOF'
-{
-  "version": 1,
-  "hooks": {
-    "sessionStart": [{"command": "./hooks/existing.sh"}],
-    "stop": [{"command": "./hooks/stop.sh"}]
-  }
-}
-EOF
 uninstall_user_targets=(
 	"${uninstall_home}/.claude/CLAUDE.md"
 	"${uninstall_home}/.codex/AGENTS.md"
@@ -1790,9 +1629,7 @@ cp "${uninstall_edit_home}/.codex/AGENTS.md" "${work}/uninstall-edit-original"
 run_uninstall_checkout_install() {
 	local home="$1"
 	shift
-	HOME="${home}" XDG_CONFIG_HOME="${home}/.config" \
-		CODEX_HOME="${home}/.codex" PATH="${test_path}" \
-		"${root}/install.sh" --configure-only "$@"
+	CODEX_HOME="${home}/.codex" in_home "${home}" "${root}/install.sh" --configure-only "$@"
 }
 run_uninstall_checkout_install "${uninstall_edit_home}" --agent codex >/dev/null
 sed 's/^- Shell:.*/- Shell: local edit that uninstall must not remove./' \
@@ -1845,10 +1682,7 @@ run_uninstall_checkout "${uninstall_mixed_home}" >/dev/null
 run_cli "${uninstall_home}" "${uninstall_bins}" "${test_path}" uninstall \
 	>"${work}/uninstall.out"
 for target in "${uninstall_user_targets[@]}"; do
-	cmp -s "${target}" "${uninstall_originals}/$(printf '%s' "${target}" | tr '/' '_')" || {
-		printf 'uninstall did not restore %s\n' "${target}" >&2
-		exit 1
-	}
+	cmp -s "${target}" "${uninstall_originals}/$(printf '%s' "${target}" | tr '/' '_')" || fail "uninstall did not restore ${target}"
 done
 [ -L "${uninstall_home}/.claude/CLAUDE.md" ]
 [ -f "${uninstall_home}/.devin/global_rules.md" ]
@@ -1896,8 +1730,7 @@ uninstall_state_home="${work}/uninstall-state-home"
 uninstall_state_config="${uninstall_state_home}/.config/agent-ready"
 mkdir -p "${uninstall_state_home}/.local/bin" "${uninstall_state_config}"
 for bin in rg codegraph; do
-	printf '#!/bin/sh\nexit 0\n' >"${uninstall_state_home}/.local/bin/${bin}"
-	chmod +x "${uninstall_state_home}/.local/bin/${bin}"
+	fake_exec "${uninstall_state_home}/.local/bin/${bin}" 'exit 0'
 done
 printf 'ripgrep v1.0.0\n' >"${uninstall_state_config}/binaries"
 printf 'v9.9.9\n' >"${uninstall_state_config}/codegraph"
@@ -1918,9 +1751,7 @@ HOME="${uninstall_state_home}" XDG_CONFIG_HOME="${uninstall_state_home}/.config"
 # Aliases resolve to canonical ids, and CodeGraph gets only the targets it has.
 new_agents_home="${work}/new-agents-home"
 mkdir -p "${new_agents_home}"
-HOME="${new_agents_home}" XDG_CONFIG_HOME="${new_agents_home}/.config" PATH="${test_path}" \
-	"${root}/install.sh" --agent agy,deepseek-harness,pi-coding-agent --configure-only \
-	>"${work}/new-agents.out" 2>&1
+in_home "${new_agents_home}" "${root}/install.sh" --agent agy,deepseek-harness,pi-coding-agent --configure-only >"${work}/new-agents.out" 2>&1
 rg -qx 'agents=antigravity,dsh,pi' "${new_agents_home}/.config/agent-ready/receipt"
 rg -qxF 'install --yes --target=antigravity --location=global --no-permissions' \
 	"${new_agents_home}/codegraph-calls"
@@ -1935,8 +1766,7 @@ rg -qF 'Code graph: index of symbols, calls, imports' "${new_agents_home}/.gemin
 launcher_home="${work}/launcher-home"
 mkdir -p "${launcher_home}"
 for selector in antigravity antigravity-cli agy dsh deepseek-harness pi pi-coding-agent; do
-	HOME="${launcher_home}" XDG_CONFIG_HOME="${launcher_home}/.config" PATH="${test_path}" \
-		"${root}/agent-ready" "${selector}" --configure-only >/dev/null 2>&1
+	in_home "${launcher_home}" "${root}/agent-ready" "${selector}" --configure-only >/dev/null 2>&1
 done
 rg -qx 'agents=antigravity,dsh,pi' "${launcher_home}/.config/agent-ready/receipt"
 
@@ -1958,23 +1788,16 @@ shared_home="${work}/shared-home"
 mkdir -p "${shared_home}/.gemini"
 printf 'user gemini\n' >"${shared_home}/.gemini/GEMINI.md"
 run_shared() {
-	HOME="${shared_home}" XDG_CONFIG_HOME="${shared_home}/.config" PATH="${test_path}" \
-		"${root}/install.sh" --configure-only "$@"
+	in_home "${shared_home}" "${root}/install.sh" --configure-only "$@"
 }
 run_shared --agent gemini,antigravity >/dev/null 2>&1
 [ "$(rg -c '^<!-- agent-ready:start -->$' "${shared_home}/.gemini/GEMINI.md")" -eq 1 ]
-if rg -q '^- Code graph:' "${shared_home}/.gemini/GEMINI.md"; then
-	printf 'shared Gemini block repeats the CodeGraph rule\n' >&2
-	exit 1
-fi
+refute 'shared Gemini block repeats the CodeGraph rule' rg -q '^- Code graph:' "${shared_home}/.gemini/GEMINI.md"
 shared_digest=$(digest_of "${shared_home}/.gemini/GEMINI.md")
 run_shared --agent antigravity,gemini >/dev/null 2>&1
 [ "$(digest_of "${shared_home}/.gemini/GEMINI.md")" = "${shared_digest}" ]
 run_shared --agent gemini,antigravity --dry-run >"${work}/shared-dry.out" 2>&1
-if rg -q 'would (add|refresh)' "${work}/shared-dry.out"; then
-	printf 'dry run of the shared Gemini file reported pending changes\n' >&2
-	exit 1
-fi
+refute 'dry run of the shared Gemini file reported pending changes' rg -q 'would (add|refresh)' "${work}/shared-dry.out"
 rg -q '^user gemini$' "${shared_home}/.gemini/GEMINI.md"
 
 # Pi loads only the first context file in its directory. A new AGENTS.md would
@@ -1982,8 +1805,7 @@ rg -q '^user gemini$' "${shared_home}/.gemini/GEMINI.md"
 pi_claude_home="${work}/pi-claude-home"
 mkdir -p "${pi_claude_home}/.pi/agent"
 printf 'user pi claude\n' >"${pi_claude_home}/.pi/agent/CLAUDE.md"
-HOME="${pi_claude_home}" XDG_CONFIG_HOME="${pi_claude_home}/.config" PATH="${test_path}" \
-	"${root}/install.sh" --agent pi --configure-only >/dev/null 2>&1
+in_home "${pi_claude_home}" "${root}/install.sh" --agent pi --configure-only >/dev/null 2>&1
 [ ! -e "${pi_claude_home}/.pi/agent/AGENTS.md" ]
 rg -q '^user pi claude$' "${pi_claude_home}/.pi/agent/CLAUDE.md"
 rg -q '^Tool routing' "${pi_claude_home}/.pi/agent/CLAUDE.md"
@@ -1991,8 +1813,7 @@ pi_override_home="${work}/pi-override-home"
 mkdir -p "${pi_override_home}/.pi/agent"
 printf 'user pi agents\n' >"${pi_override_home}/.pi/agent/AGENTS.md"
 printf 'user pi override\n' >"${pi_override_home}/.pi/agent/AGENTS.override.md"
-HOME="${pi_override_home}" XDG_CONFIG_HOME="${pi_override_home}/.config" PATH="${test_path}" \
-	"${root}/install.sh" --agent pi --configure-only >/dev/null 2>&1
+in_home "${pi_override_home}" "${root}/install.sh" --agent pi --configure-only >/dev/null 2>&1
 rg -q '^Tool routing' "${pi_override_home}/.pi/agent/AGENTS.override.md"
 [ "$(cat "${pi_override_home}/.pi/agent/AGENTS.md")" = 'user pi agents' ]
 
@@ -2042,26 +1863,19 @@ run_uninstall_checkout "${agy_home}" >"${work}/agy-uninstall.out" 2>&1
 [ "$(cat "${agy_home}/.gemini/GEMINI.md")" = 'user gemini' ]
 rg -qF 'rtk init -g --agent antigravity --uninstall' "${work}/agy-uninstall.out"
 rg -qF 'rtk init -g --agent pi --uninstall' "${work}/agy-uninstall.out"
-if rg -q '^Gemini CLI:' "${work}/agy-uninstall.out"; then
-	printf 'uninstall reported Gemini CLI for an Antigravity-only file\n' >&2
-	exit 1
-fi
+refute 'uninstall reported Gemini CLI for an Antigravity-only file' rg -q '^Gemini CLI:' "${work}/agy-uninstall.out"
 gemini_only_home="${work}/gemini-only-home"
 mkdir -p "${gemini_only_home}/.gemini"
 run_uninstall_checkout_install "${gemini_only_home}" --agent gemini >/dev/null 2>&1
 run_uninstall_checkout "${gemini_only_home}" >"${work}/gemini-only-uninstall.out" 2>&1
 rg -q '^Gemini CLI:' "${work}/gemini-only-uninstall.out"
-if rg -q 'Antigravity|antigravity' "${work}/gemini-only-uninstall.out"; then
-	printf 'uninstall reported Antigravity for a Gemini-only file\n' >&2
-	exit 1
-fi
+refute 'uninstall reported Antigravity for a Gemini-only file' rg -q 'Antigravity|antigravity' "${work}/gemini-only-uninstall.out"
 
 # --- regressions from the v1.5.0 audit ------------------------------------------
 regression_install() {
 	local home="$1"
 	shift
-	HOME="${home}" XDG_CONFIG_HOME="${home}/.config" XDG_DATA_HOME="${home}/.local/share" \
-		CODEX_HOME="${home}/.codex" PATH="${test_path}" "${root}/install.sh" "$@"
+	CODEX_HOME="${home}/.codex" in_home "${home}" "${root}/install.sh" "$@"
 }
 has_no_block() { [ ! -f "$1" ] || ! rg -qF 'agent-ready:start' "$1"; }
 stale_block() { printf '<!-- agent-ready:start -->\nold\n<!-- agent-ready:end -->\n' >"$1"; }
@@ -2110,22 +1924,14 @@ mkdir -p "${shared_home}/.claude" "${shared_home}/.codex"
 printf 'user claude\n' >"${shared_home}/.claude/CLAUDE.md"
 ln -s "${shared_home}/.claude/CLAUDE.md" "${shared_home}/.codex/AGENTS.md"
 printf 'user override\n' >"${shared_home}/.codex/AGENTS.override.md"
-HOME="${shared_home}" XDG_CONFIG_HOME="${shared_home}/.config" CLAUDE_CONFIG_DIR="${shared_home}/.claude" \
-	CODEX_HOME="${shared_home}/.codex" PATH="${test_path}" \
-	"${root}/install.sh" --agent claude,codex --configure-only >/dev/null 2>&1
+CLAUDE_CONFIG_DIR="${shared_home}/.claude" CODEX_HOME="${shared_home}/.codex" in_home "${shared_home}" "${root}/install.sh" --agent claude,codex --configure-only >/dev/null 2>&1
 [ "$(rg -cF 'agent-ready:start' "${shared_home}/.claude/CLAUDE.md")" -eq 1 ]
 [ "$(rg -cF 'agent-ready:start' "${shared_home}/.codex/AGENTS.override.md")" -eq 1 ]
 loop_home="${work}/loop-home"
 mkdir -p "${loop_home}/.codex"
 ln -s AGENTS.override.md "${loop_home}/.codex/AGENTS.override.md"
-if regression_install "${loop_home}" --agent codex --configure-only --dry-run >/dev/null 2>&1; then
-	printf 'dry run accepted a symlink loop as a stale candidate\n' >&2
-	exit 1
-fi
-if regression_install "${loop_home}" --agent codex --configure-only >/dev/null 2>&1; then
-	printf 'install accepted a symlink loop as a stale candidate\n' >&2
-	exit 1
-fi
+refute 'dry run accepted a symlink loop as a stale candidate' regression_install "${loop_home}" --agent codex --configure-only --dry-run >/dev/null 2>&1
+refute 'install accepted a symlink loop as a stale candidate' regression_install "${loop_home}" --agent codex --configure-only >/dev/null 2>&1
 [ ! -e "${loop_home}/.codex/AGENTS.md" ]
 
 # Local edits in a block about to move stop the run before anything is written.
@@ -2134,10 +1940,7 @@ regression_install "${pi_edit_home}" --agent pi --configure-only >/dev/null 2>&1
 awk -v e='<!-- agent-ready:end -->' '$0 == e { print "local edit" } { print }' \
 	"${pi_edit_home}/.pi/agent/AGENTS.md" >"${work}/pi-edit" && cp "${work}/pi-edit" "${pi_edit_home}/.pi/agent/AGENTS.md"
 printf 'user pi override\n' >"${pi_edit_home}/.pi/agent/AGENTS.override.md"
-if regression_install "${pi_edit_home}" --agent pi --configure-only >"${work}/pi-edit.out" 2>&1; then
-	printf 'install moved a block with local edits\n' >&2
-	exit 1
-fi
+refute 'install moved a block with local edits' regression_install "${pi_edit_home}" --agent pi --configure-only >"${work}/pi-edit.out" 2>&1
 [ "$(cat "${pi_edit_home}/.pi/agent/AGENTS.override.md")" = 'user pi override' ]
 
 # Codex reads a non-empty override instead of AGENTS.md, and CodeGraph's section
@@ -2161,17 +1964,11 @@ rg -q '^Tool routing' "${codex_empty_home}/.codex/AGENTS.md"
 crlf_home="${work}/crlf-home"
 regression_install "${crlf_home}" --agent qwen --configure-only >/dev/null 2>&1
 awk '{ printf "%s\r\n", $0 }' "${crlf_home}/.qwen/QWEN.md" >"${work}/crlf" && cp "${work}/crlf" "${crlf_home}/.qwen/QWEN.md"
-if regression_install "${crlf_home}" --agent qwen --configure-only >/dev/null 2>&1; then
-	printf 'install accepted CRLF agent-ready markers\n' >&2
-	exit 1
-fi
+refute 'install accepted CRLF agent-ready markers' regression_install "${crlf_home}" --agent qwen --configure-only >/dev/null 2>&1
 [ "$(rg -cF 'agent-ready:start' "${crlf_home}/.qwen/QWEN.md")" -eq 1 ]
 directory_home="${work}/directory-home"
 mkdir -p "${directory_home}/.qwen/QWEN.md"
-if regression_install "${directory_home}" --agent qwen --configure-only --dry-run >"${work}/directory.out" 2>&1; then
-	printf 'dry run accepted a directory as an instruction file\n' >&2
-	exit 1
-fi
+refute 'dry run accepted a directory as an instruction file' regression_install "${directory_home}" --agent qwen --configure-only --dry-run >"${work}/directory.out" 2>&1
 rg -qF 'not a regular file' "${work}/directory.out"
 dangling_home="${work}/dangling-home"
 mkdir -p "${dangling_home}/.cursor"
@@ -2186,8 +1983,7 @@ printf '{"mcpServers":{"mine":{"command":"mine"}}}\n' >"${mode_home}/dotfiles/mc
 ln -s "${mode_home}/dotfiles/mcp.json" "${mode_home}/.cursor/mcp.json"
 chmod 644 "${mode_home}/.cursor/hooks.json" "${mode_home}/dotfiles/mcp.json"
 regression_install "${mode_home}" --agent cursor --configure-only >/dev/null 2>&1
-HOME="${mode_home}" XDG_CONFIG_HOME="${mode_home}/.config" PATH="${test_path}" \
-	"${root}/languages/go/install.sh" --agent cursor --configure-only >/dev/null 2>&1
+in_home "${mode_home}" "${root}/languages/go/install.sh" --agent cursor --configure-only >/dev/null 2>&1
 [ -n "$(find "${mode_home}/.cursor/hooks.json" -perm 644)" ]
 [ -n "$(find "${mode_home}/dotfiles/mcp.json" -perm 644)" ]
 [ -L "${mode_home}/.cursor/mcp.json" ]
@@ -2197,8 +1993,7 @@ jq -e '.mcpServers.gopls and .mcpServers.mine' "${mode_home}/dotfiles/mcp.json" 
 go_explicit_home="${work}/go-explicit-home"
 mkdir -p "${go_explicit_home}"
 regression_install "${go_explicit_home}" --agent claude --configure-only >/dev/null 2>&1
-HOME="${go_explicit_home}" XDG_CONFIG_HOME="${go_explicit_home}/.config" PATH="${test_path}" \
-	"${root}/languages/go/install.sh" --configure-only >/dev/null 2>&1
+in_home "${go_explicit_home}" "${root}/languages/go/install.sh" --configure-only >/dev/null 2>&1
 rg -qx 'agents=claude' "${go_explicit_home}/.config/agent-ready/receipt"
 rg -qx 'languages=go' "${go_explicit_home}/.config/agent-ready/receipt"
 [ ! -e "${go_explicit_home}/.codex/AGENTS.md" ]
@@ -2245,11 +2040,9 @@ rg -qx 'version=v9.9.1' "${notes_home}/.config/agent-ready/receipt"
 # as the first argument too.
 self_dry_home="${work}/self-dry-home"
 mkdir -p "${self_dry_home}"
-HOME="${self_dry_home}" XDG_CONFIG_HOME="${self_dry_home}/.config" XDG_DATA_HOME="${self_dry_home}/.local/share" \
-	PATH="${test_path}" bash "${root}/agent-ready" --self-install --agent qwen --configure-only --dry-run >/dev/null 2>&1
+in_home "${self_dry_home}" bash "${root}/agent-ready" --self-install --agent qwen --configure-only --dry-run >/dev/null 2>&1
 [ ! -e "${self_dry_home}/.local" ]
-HOME="${self_dry_home}" XDG_CONFIG_HOME="${self_dry_home}/.config" XDG_DATA_HOME="${self_dry_home}/.local/share" \
-	PATH="${test_path}" bash "${root}/agent-ready" --dry-run --agent qwen --configure-only >/dev/null 2>&1
+in_home "${self_dry_home}" bash "${root}/agent-ready" --dry-run --agent qwen --configure-only >/dev/null 2>&1
 [ ! -e "${self_dry_home}/.qwen" ]
 
 # Migrations run in version order across a major version.
@@ -2264,8 +2057,7 @@ for migration in v1.9.0-a v1.10.0-b v2.0.0-c; do
 	chmod +x "${order_tree}/migrations/${migration}.sh"
 done
 regression_install "${order_home}" --agent qwen --configure-only >/dev/null 2>&1
-HOME="${order_home}" XDG_CONFIG_HOME="${order_home}/.config" PATH="${test_path}" \
-	bash "${order_tree}/agent-ready" apply-update --from v1.8.0 >/dev/null 2>&1
+in_home "${order_home}" bash "${order_tree}/agent-ready" apply-update --from v1.8.0 >/dev/null 2>&1
 [ "$(tr '\n' ' ' <"${order_home}/migrations")" = 'v1.9.0-a v1.10.0-b v2.0.0-c ' ]
 
 # Rollback to a release whose strict receipt reader rejects a newer agent: this
@@ -2297,17 +2089,11 @@ run_rollback_new() {
 		bash "${root}/agent-ready" rollback
 }
 write_rollback_receipt pi pi
-if run_rollback_new >/dev/null 2>&1; then
-	printf 'rollback to a release that supports none of the agents succeeded\n' >&2
-	exit 1
-fi
+refute 'rollback to a release that supports none of the agents succeeded' run_rollback_new >/dev/null 2>&1
 rg -qx 'agents=pi' "${rollback_receipt}"
 write_rollback_receipt claude,pi claude,pi
 touch "${rollback_new_home}/old-release-fails"
-if run_rollback_new >/dev/null 2>&1; then
-	printf 'rollback ignored a failing older installer\n' >&2
-	exit 1
-fi
+refute 'rollback ignored a failing older installer' run_rollback_new >/dev/null 2>&1
 rm "${rollback_new_home}/old-release-fails"
 rg -qx 'agents=claude,pi' "${rollback_receipt}"
 [ ! -e "${rollback_new_home}/bin/agent-ready" ]
@@ -2333,10 +2119,7 @@ run_release "${downgrade_home}" "${downgrade_bins}" v9.9.0 "${base_bin}" --agent
 run_update "${downgrade_home}" "${downgrade_bins}" 0 --dry-run v1.4.1 >"${work}/downgrade.out" 2>&1
 rg -qx 'agents=claude,pi' "${downgrade_receipt}"
 rg -qF 'nothing changed' "${work}/downgrade.out"
-if run_update "${downgrade_home}" "${downgrade_bins}" 0 v1.0.1 >/dev/null 2>&1; then
-	printf 'update to an unpublished release succeeded\n' >&2
-	exit 1
-fi
+refute 'update to an unpublished release succeeded' run_update "${downgrade_home}" "${downgrade_bins}" 0 v1.0.1 >/dev/null 2>&1
 rg -qx 'agents=claude,pi' "${downgrade_receipt}"
 run_update "${downgrade_home}" "${downgrade_bins}" 0 v1.4.1 >/dev/null 2>&1
 rg -qx 'agents=claude' "${downgrade_receipt}"
@@ -2368,10 +2151,7 @@ rg -qF 'rtk init -g --gemini --uninstall' "${work}/hints.out"
 rg -qF 'rtk init -g --copilot --uninstall' "${work}/hints.out"
 rg -qF 'timeout link: rm ' "${work}/hints.out"
 [ -f "${hints_home}/.config/agent-ready/binaries" ]
-if rg -qF 'codegraph bundle:' "${work}/hints.out"; then
-	printf 'uninstall offered to remove a codegraph it does not own\n' >&2
-	exit 1
-fi
+refute 'uninstall offered to remove a codegraph it does not own' rg -qF 'codegraph bundle:' "${work}/hints.out"
 
 # The GitHub token reaches curl on stdin, never in its arguments, and only for the
 # real API.
@@ -2389,18 +2169,12 @@ HOME="${token_home}" XDG_CONFIG_HOME="${token_home}/.config" XDG_DATA_HOME="${to
 	PATH="${token_bin}:${test_path}" GITHUB_TOKEN=synthetic-value "${root}/install-codegraph.sh" </dev/null >/dev/null 2>&1 || true
 rg -qF 'api.github.com' "${token_home}/curl-args"
 rg -qF 'Authorization: Bearer synthetic-value' "${token_home}/curl-stdin"
-if rg -qF 'synthetic-value' "${token_home}/curl-args"; then
-	printf 'the GitHub token was passed in curl arguments\n' >&2
-	exit 1
-fi
+refute 'the GitHub token was passed in curl arguments' rg -qF 'synthetic-value' "${token_home}/curl-args"
 rm "${token_home}/curl-args" "${token_home}/curl-stdin"
 HOME="${token_home}" XDG_CONFIG_HOME="${token_home}/.config" XDG_DATA_HOME="${token_home}/.local/share" \
 	PATH="${token_bin}:${test_path}" GITHUB_TOKEN=synthetic-value AGENT_READY_GITHUB_API=https://example.invalid \
 	"${root}/install-codegraph.sh" </dev/null >/dev/null 2>&1 || true
-if rg -qF 'synthetic-value' "${token_home}/curl-stdin"; then
-	printf 'the GitHub token was sent to an API override\n' >&2
-	exit 1
-fi
+refute 'the GitHub token was sent to an API override' rg -qF 'synthetic-value' "${token_home}/curl-stdin"
 
 # regression: the printed Gemini command survives rtk deleting all of GEMINI.md.
 gemini_home="${work}/gemini-hint-home"
@@ -2432,23 +2206,16 @@ if [ "$(id -u)" -ne 0 ]; then
 	readonly_home="${work}/readonly-home"
 	readonly_file="${readonly_home}/.config/kilo/AGENTS.md"
 	run_readonly() {
-		HOME="${readonly_home}" XDG_CONFIG_HOME="${readonly_home}/.config" PATH="${test_path}" \
-			"${root}/install.sh" "$@"
+		in_home "${readonly_home}" "${root}/install.sh" "$@"
 	}
 	mkdir -p "$(dirname -- "${readonly_file}")"
 	printf 'user kilo\n' >"${readonly_file}"
 	chmod 444 "${readonly_file}"
-	if run_readonly --configure-only --agent kilo >"${work}/readonly.out" 2>&1; then
-		printf 'install reported success on a read-only file\n' >&2
-		exit 1
-	fi
+	refute 'install reported success on a read-only file' run_readonly --configure-only --agent kilo >"${work}/readonly.out" 2>&1
 	rg -qF 'file is not writable' "${work}/readonly.out"
 	[ "$(cat "${readonly_file}")" = 'user kilo' ]
 	[ ! -e "${readonly_home}/.config/agent-ready/receipt" ]
-	if run_readonly --configure-only --agent kilo --dry-run >"${work}/readonly.out" 2>&1; then
-		printf 'dry run reported success on a read-only file\n' >&2
-		exit 1
-	fi
+	refute 'dry run reported success on a read-only file' run_readonly --configure-only --agent kilo --dry-run >"${work}/readonly.out" 2>&1
 	rg -qF 'blocked (file is not writable)' "${work}/readonly.out"
 	# A read-only file already holding the current block needs no write.
 	chmod 644 "${readonly_file}"
@@ -2456,10 +2223,7 @@ if [ "$(id -u)" -ne 0 ]; then
 	chmod 444 "${readonly_file}"
 	run_readonly --configure-only --agent kilo >/dev/null 2>&1
 	# Uninstall keeps the receipt, because the block it records is still there.
-	if run_readonly --uninstall >"${work}/readonly.out" 2>&1; then
-		printf 'uninstall reported success on a read-only file\n' >&2
-		exit 1
-	fi
+	refute 'uninstall reported success on a read-only file' run_readonly --uninstall >"${work}/readonly.out" 2>&1
 	rg -qF 'agent-ready:start' "${readonly_file}"
 	[ -f "${readonly_home}/.config/agent-ready/receipt" ]
 	[ "$(find "$(dirname -- "${readonly_file}")" -type f | wc -l | tr -d ' ')" -eq 1 ]
@@ -2469,12 +2233,7 @@ fi
 parent_home="${work}/parent-file-home"
 mkdir -p "${parent_home}/.config"
 printf 'not a directory\n' >"${parent_home}/.config/kilo"
-if HOME="${parent_home}" XDG_CONFIG_HOME="${parent_home}/.config" PATH="${test_path}" \
-	CLAUDE_CONFIG_DIR="${parent_home}/.claude" \
-	"${root}/install.sh" --configure-only --agent claude,kilo >/dev/null 2>&1; then
-	printf 'install reported success with a file in place of a directory\n' >&2
-	exit 1
-fi
+if CLAUDE_CONFIG_DIR="${parent_home}/.claude" in_home "${parent_home}" "${root}/install.sh" --configure-only --agent claude,kilo >/dev/null 2>&1; then fail 'install reported success with a file in place of a directory'; fi
 [ ! -e "${parent_home}/.claude/CLAUDE.md" ]
 
 # regression: local edits in the legacy Cursor block need --force, like any block.
@@ -2483,13 +2242,9 @@ mkdir -p "${cursor_edit_home}/.cursor"
 printf 'user cursor\n<!-- agent-ready:start -->\n<!-- agent-ready v1.4.0 sha256:%064d -->\nmy edit\n<!-- agent-ready:end -->\n' 0 \
 	>"${cursor_edit_home}/.cursor/AGENTS.md"
 run_cursor_edit() {
-	HOME="${cursor_edit_home}" XDG_CONFIG_HOME="${cursor_edit_home}/.config" PATH="${test_path}" \
-		"${root}/install.sh" --configure-only --agent cursor "$@"
+	in_home "${cursor_edit_home}" "${root}/install.sh" --configure-only --agent cursor "$@"
 }
-if run_cursor_edit >/dev/null 2>&1; then
-	printf 'install removed local edits from the legacy Cursor block\n' >&2
-	exit 1
-fi
+refute 'install removed local edits from the legacy Cursor block' run_cursor_edit >/dev/null 2>&1
 rg -qF 'my edit' "${cursor_edit_home}/.cursor/AGENTS.md"
 run_cursor_edit --force >/dev/null 2>&1
 [ "$(cat "${cursor_edit_home}/.cursor/AGENTS.md")" = 'user cursor' ]
@@ -2522,8 +2277,7 @@ rg -qF 'go: skipped the codex setup' "${work}/language-skip.out"
 # regression: an update that fails after the installer ran stays retryable.
 retry_overlay="${work}/retry-overlay"
 mkdir -p "${retry_overlay}/languages/go"
-printf '#!/bin/sh\nexit 1\n' >"${retry_overlay}/languages/go/install.sh"
-chmod +x "${retry_overlay}/languages/go/install.sh"
+fake_exec "${retry_overlay}/languages/go/install.sh" 'exit 1'
 publish_agent_ready v9.9.5 v9.9.5 "$(stamp_ago 48)" "${retry_overlay}"
 retry_home="${work}/retry-home"
 retry_bins="${work}/retry-launcher-bin"
@@ -2533,10 +2287,7 @@ mkdir -p "${retry_home}/.config/agent-ready/languages"
 printf 'enabled\n' >"${retry_home}/.config/agent-ready/languages/go"
 sed 's/^languages=$/languages=go/' "${retry_home}/.config/agent-ready/receipt" >"${work}/retry-receipt"
 cp "${work}/retry-receipt" "${retry_home}/.config/agent-ready/receipt"
-if run_update "${retry_home}" "${retry_bins}" 0 v9.9.5 >/dev/null 2>&1; then
-	printf 'update ignored a failing language installer\n' >&2
-	exit 1
-fi
+refute 'update ignored a failing language installer' run_update "${retry_home}" "${retry_bins}" 0 v9.9.5 >/dev/null 2>&1
 rg -qx 'version=v9.9.0' "${retry_home}/.config/agent-ready/receipt"
 [ "$(readlink "${retry_bins}/agent-ready")" = "${retry_home}/.local/share/agent-ready/versions/v9.9.0/agent-ready" ]
 [ "$(find "${retry_home}/.config/agent-ready" -name 'receipt.*' | wc -l | tr -d ' ')" -eq 0 ]
@@ -2548,15 +2299,11 @@ mkdir -p "${hint_home}/.local/bin" "${hint_home}/.config/agent-ready/languages"
 printf '#!/bin/sh\n' >"${hint_home}/.local/bin/uv"
 printf 'enabled\n' >"${hint_home}/.config/agent-ready/languages/go"
 run_owned_hint() {
-	HOME="${hint_home}" XDG_CONFIG_HOME="${hint_home}/.config" CLAUDE_CONFIG_DIR="${hint_home}/.claude" \
-		PATH="${test_path}" "${root}/install.sh" "$@"
+	CLAUDE_CONFIG_DIR="${hint_home}/.claude" in_home "${hint_home}" "${root}/install.sh" "$@"
 }
 run_owned_hint --configure-only --agent claude >/dev/null 2>&1
 run_owned_hint --uninstall >"${work}/owned-hint.out" 2>&1
-if rg -qF "${hint_home}/.local/bin/uv" "${work}/owned-hint.out"; then
-	printf 'uninstall offered to delete a tool a configure-only install never wrote\n' >&2
-	exit 1
-fi
+refute 'uninstall offered to delete a tool a configure-only install never wrote' rg -qF "${hint_home}/.local/bin/uv" "${work}/owned-hint.out"
 rg -qF 'claude mcp remove --scope user gopls' "${work}/owned-hint.out"
 
 # Fixtures for the checks below: only what each one names is on PATH, so detection
@@ -2570,8 +2317,7 @@ fix_bin() {
 	done
 	ln -sf "$(command -v jq)" "${dir}/jq"
 	for command in "$@"; do
-		printf '#!/bin/sh\nexit 0\n' >"${dir}/${command}"
-		chmod +x "${dir}/${command}"
+		fake_exec "${dir}/${command}" 'exit 0'
 	done
 }
 fix_run() {
@@ -2581,12 +2327,6 @@ fix_run() {
 	HOME="${home}" PATH="${bin}:/usr/bin:/bin" "$@"
 }
 block_count() { rg -c '^<!-- agent-ready:start -->$' "$1" || printf '0\n'; }
-lacks() {
-	if rg "$@"; then
-		printf 'unexpected match: %s\n' "$*" >&2
-		exit 1
-	fi
-}
 
 fixes_bin="${work}/fixes-bin"
 fix_bin "${fixes_bin}"
@@ -2594,8 +2334,7 @@ fix_bin "${fixes_bin}"
 # regression: Kilo loads the first of its AGENTS.md and ~/.claude/CLAUDE.md that
 # exists, so a new AGENTS.md must not hide a CLAUDE.md it already reads.
 kilo_home="${work}/kilo-home"
-mkdir -p "${kilo_home}/.claude"
-printf 'my claude notes\n' >"${kilo_home}/.claude/CLAUDE.md"
+claude_notes "${kilo_home}"
 fix_run "${kilo_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >/dev/null
 [ ! -e "${kilo_home}/.config/kilo/AGENTS.md" ]
 rg -qx 'my claude notes' "${kilo_home}/.claude/CLAUDE.md"
@@ -2616,16 +2355,15 @@ fix_run "${kilo_both_home}" "${fixes_bin}" "${root}/install.sh" --configure-only
 # Kilo's own file wins when it exists, and with CLAUDE.md switched off a new one
 # hides nothing.
 kilo_own_home="${work}/kilo-own-home"
-mkdir -p "${kilo_own_home}/.claude" "${kilo_own_home}/.config/kilo"
-printf 'my claude notes\n' >"${kilo_own_home}/.claude/CLAUDE.md"
+mkdir -p "${kilo_own_home}/.config/kilo"
+claude_notes "${kilo_own_home}"
 printf 'my kilo notes\n' >"${kilo_own_home}/.config/kilo/AGENTS.md"
 fix_run "${kilo_own_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >"${work}/kilo-own.out"
 [ "$(block_count "${kilo_own_home}/.config/kilo/AGENTS.md")" -eq 1 ]
 [ "$(block_count "${kilo_own_home}/.claude/CLAUDE.md")" -eq 0 ]
 lacks -qF 'hides' "${work}/kilo-own.out"
 kilo_off_home="${work}/kilo-off-home"
-mkdir -p "${kilo_off_home}/.claude"
-printf 'my claude notes\n' >"${kilo_off_home}/.claude/CLAUDE.md"
+claude_notes "${kilo_off_home}"
 KILO_DISABLE_CLAUDE_CODE=1 fix_run "${kilo_off_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >/dev/null
 [ "$(block_count "${kilo_off_home}/.config/kilo/AGENTS.md")" -eq 1 ]
 [ "$(block_count "${kilo_off_home}/.claude/CLAUDE.md")" -eq 0 ]
@@ -2635,8 +2373,7 @@ KILO_DISABLE_CLAUDE_CODE=1 fix_run "${kilo_off_home}" "${fixes_bin}" "${root}/in
 kilo_legacy_home="${work}/kilo-legacy-home"
 fix_run "${kilo_legacy_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >/dev/null
 [ "$(block_count "${kilo_legacy_home}/.config/kilo/AGENTS.md")" -eq 1 ]
-mkdir -p "${kilo_legacy_home}/.claude"
-printf 'my claude notes\n' >"${kilo_legacy_home}/.claude/CLAUDE.md"
+claude_notes "${kilo_legacy_home}"
 fix_run "${kilo_legacy_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo >"${work}/kilo-legacy.out"
 rg -qF 'holds nothing of yours but hides' "${work}/kilo-legacy.out"
 fix_run "${kilo_legacy_home}" "${fixes_bin}" "${root}/install.sh" --uninstall >"${work}/kilo-legacy-un.out"
@@ -2751,8 +2488,7 @@ rg -qF 'printed nothing' "${work}/go-silent.out"
 path_warn_home="${work}/path-warn-home"
 path_warn_api="${work}/path-warn-api"
 mkdir -p "${work}/path-warn-pkg/codegraph/bin" "${path_warn_api}/repos/colbymchenry/codegraph/releases"
-printf '#!/bin/sh\nexit 0\n' >"${work}/path-warn-pkg/codegraph/bin/codegraph"
-chmod +x "${work}/path-warn-pkg/codegraph/bin/codegraph"
+fake_exec "${work}/path-warn-pkg/codegraph/bin/codegraph" 'exit 0'
 tar -czf "${work}/path-warn.tar.gz" -C "${work}/path-warn-pkg" codegraph
 cat >"${path_warn_api}/repos/colbymchenry/codegraph/releases/latest" <<EOF
 {"tag_name":"v9.9.9","assets":[{"name":"codegraph-linux-x64.tar.gz","browser_download_url":"file://${work}/path-warn.tar.gz","digest":"sha256:$(digest_of "${work}/path-warn.tar.gz")"}]}
@@ -2782,8 +2518,7 @@ rg -qF 'DeepSeek Harness: would add' "${work}/detect.out"
 hint_brew_home="${work}/hint-brew-home"
 fix_bin "${work}/hint-brew-bin"
 cp "${fake_bin}/brew" "${work}/hint-brew-bin/brew"
-printf '#!/bin/sh\nexit 0\n' >"${work}/hint-brew-bin/sd"
-chmod +x "${work}/hint-brew-bin/sd"
+fake_exec "${work}/hint-brew-bin/sd" 'exit 0'
 mkdir -p "${hint_brew_home}/.config/agent-ready"
 fix_run "${hint_brew_home}" "${work}/hint-brew-bin" "${root}/install.sh" --configure-only --agent claude,copilot,qwen >/dev/null
 sed 's/^tools=.*/tools=brew/' "${hint_brew_home}/.config/agent-ready/receipt" >"${work}/hint-brew-receipt"
@@ -2825,8 +2560,8 @@ KILO_CONFIG_DIR="${kilo_profile_home}/profile" fix_run "${kilo_profile_home}" "$
 # and a variable the migration does not cover keeps CLAUDE.md in play.
 for kilo_state in .local/state/kilo .local/share/kilo/state; do
 	kilo_moved_home="${work}/kilo-migrated-${kilo_state//\//-}"
-	mkdir -p "${kilo_moved_home}/.claude" "${kilo_moved_home}/${kilo_state}"
-	printf 'my claude notes\n' >"${kilo_moved_home}/.claude/CLAUDE.md"
+	mkdir -p "${kilo_moved_home}/${kilo_state}"
+	claude_notes "${kilo_moved_home}"
 	printf '{}\n' >"${kilo_moved_home}/${kilo_state}/claude-migration.json"
 	fix_run "${kilo_moved_home}" "${fixes_bin}" "${root}/install.sh" --configure-only --agent kilo --dry-run >"${work}/kilo-migrated.out"
 	rg -qF "${kilo_moved_home}/.config/kilo/AGENTS.md" "${work}/kilo-migrated.out"
@@ -2838,11 +2573,9 @@ rg -qF "${kilo_moved_home}/.claude/CLAUDE.md" "${work}/kilo-migrated.out"
 # CLAUDE.md and CodeGraph, which would create that AGENTS.md, leaves OpenCode out.
 opencode_bin="${work}/opencode-bin"
 fix_bin "${opencode_bin}"
-printf '#!/bin/sh\necho "1.19.5"\n' >"${opencode_bin}/opencode"
-chmod +x "${opencode_bin}/opencode"
+fake_exec "${opencode_bin}/opencode" 'echo "1.19.5"'
 opencode_home="${work}/opencode-v1-home"
-mkdir -p "${opencode_home}/.claude"
-printf 'my claude notes\n' >"${opencode_home}/.claude/CLAUDE.md"
+claude_notes "${opencode_home}"
 fix_run "${opencode_home}" "${opencode_bin}" "${root}/install.sh" --configure-only --agent opencode,codex >"${work}/opencode-v1.out" 2>&1
 [ ! -e "${opencode_home}/.config/opencode/AGENTS.md" ]
 [ "$(block_count "${opencode_home}/.claude/CLAUDE.md")" -eq 1 ]
@@ -2855,8 +2588,7 @@ rg -qx 'my claude notes' "${opencode_home}/.claude/CLAUDE.md"
 
 # Automatic detection must not let CodeGraph's auto target create that file either.
 opencode_auto_home="${work}/opencode-v1-auto-home"
-mkdir -p "${opencode_auto_home}/.claude"
-printf 'my claude notes\n' >"${opencode_auto_home}/.claude/CLAUDE.md"
+claude_notes "${opencode_auto_home}"
 fix_run "${opencode_auto_home}" "${opencode_bin}" "${root}/install.sh" --configure-only >/dev/null 2>&1
 [ "$(block_count "${opencode_auto_home}/.claude/CLAUDE.md")" -eq 1 ]
 lacks -qF -- '--target=auto' "${opencode_auto_home}/codegraph-calls"
@@ -2865,8 +2597,8 @@ lacks -qF 'opencode' "${opencode_auto_home}/codegraph-calls"
 # An existing AGENTS.md is what OpenCode loads, and one holding only managed content
 # is pointed out, including after uninstall leaves it empty.
 opencode_own_home="${work}/opencode-v1-own-home"
-mkdir -p "${opencode_own_home}/.claude" "${opencode_own_home}/.config/opencode"
-printf 'my claude notes\n' >"${opencode_own_home}/.claude/CLAUDE.md"
+mkdir -p "${opencode_own_home}/.config/opencode"
+claude_notes "${opencode_own_home}"
 : >"${opencode_own_home}/.config/opencode/AGENTS.md"
 fix_run "${opencode_own_home}" "${opencode_bin}" "${root}/install.sh" --configure-only --agent opencode >"${work}/opencode-own.out" 2>&1
 [ "$(block_count "${opencode_own_home}/.config/opencode/AGENTS.md")" -eq 1 ]
@@ -2938,10 +2670,7 @@ links_stop_home="${work}/links-stop-home"
 mkdir -p "${links_stop_home}/.claude" "${links_stop_home}/dotfiles"
 printf '{}\n' >"${links_stop_home}/dotfiles/settings.json"
 ln -s ../dotfiles/settings.json "${links_stop_home}/.claude/settings.json"
-if fix_run "${links_stop_home}" "${links_stop_bin}" "${root}/install.sh" --configure-only --agent claude,codex >/dev/null 2>&1; then
-	printf 'the failing rtk step did not stop the install\n' >&2
-	exit 1
-fi
+refute 'the failing rtk step did not stop the install' fix_run "${links_stop_home}" "${links_stop_bin}" "${root}/install.sh" --configure-only --agent claude,codex >/dev/null 2>&1
 [ -L "${links_stop_home}/.claude/settings.json" ]
 rg -qF 'written by rtk' "${links_stop_home}/dotfiles/settings.json"
 
@@ -2963,12 +2692,10 @@ rg -q '^configured=.*antigravity' "${antigravity_home}/.config/agent-ready/recei
 # OpenCode and Kilo parse their flags with Effect, which also takes yes, on, and y.
 flags_bin="${work}/flags-bin"
 fix_bin "${flags_bin}"
-printf '#!/bin/sh\necho "1.19.5"\n' >"${flags_bin}/opencode"
-chmod +x "${flags_bin}/opencode"
+fake_exec "${flags_bin}/opencode" 'echo "1.19.5"'
 for flag in yes on y; do
 	flags_home="${work}/flags-home-${flag}"
-	mkdir -p "${flags_home}/.claude"
-	printf 'my claude notes\n' >"${flags_home}/.claude/CLAUDE.md"
+	claude_notes "${flags_home}"
 	fix_run "${flags_home}" "${flags_bin}" env OPENCODE_DISABLE_CLAUDE_CODE="${flag}" KILO_DISABLE_CLAUDE_CODE="${flag}" \
 		"${root}/install.sh" --configure-only --agent opencode,kilo >/dev/null 2>&1
 	[ "$(block_count "${flags_home}/.claude/CLAUDE.md")" -eq 0 ]
